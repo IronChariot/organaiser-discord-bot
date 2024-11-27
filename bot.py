@@ -47,14 +47,10 @@ async def on_message(message):
                 message_history.append({"role": "assistant", "content": corrected_content})
             else:
                 message_history.append({"role": "user", "content": f"[{mess.author.global_name}] {corrected_content}"})
-        print(message_history)
         response = ollama.chat_completion('llama31_q5', message_history)
         # Debug the response structure
-        print("Full response:", response)
-        print("Response dict:", response.__dict__)
         response_json = json.loads(response._content)
         response_content = response_json["message"]["content"]
-        print(response_content)
         await message.channel.send(response_content)
 
 @client.event
