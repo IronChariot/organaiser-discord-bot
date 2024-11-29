@@ -6,37 +6,47 @@ from typing import List, Dict, Tuple
 import anthropic
 from openai import OpenAI
 
+
 class Model(ABC):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0, max_tokens: int = 1024, logger=None):
         self.model_name = model_name
         self.system_prompt = system_prompt
-        self.messages: List[Dict[str, str]] = []
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.logger = logger or logging.getLogger(__name__)
 
-    def query(self, user_message: str, validate_func) -> str:
-        original_temp = self.temperature
-        max_attempts = int((1.0 - original_temp) / 0.1) + 1  # Calculate max attempts to reach t=1.0
+    def query(self, messages: List[Dict[str, str]], system_prompt=None, validate_func=None, as_json=False) -> str:
+        temperature = self.temperature
+        max_attempts = int((1.0 - temperature) / 0.1) + 1  # Calculate max attempts to reach t=1.0
+
+        if system_prompt is None:
+            system_prompt = self.system_prompt
 
         for attempt in range(max_attempts):
             if attempt > 0:
-                self.logger.info(f"Querying model (Attempt {attempt + 1}, Temperature: {self.temperature})")
-            self.logger.info(f"User message: {user_message}")
+                self.logger.info(f"Querying model (Attempt {attempt + 1}, Temperature: {temperature})")
+            self.logger.info(f"User message: {messages[1]["content"]}")
 
-            response, self.messages = self.chat_completion(user_message, self.messages, self.model_name, self.temperature, self.max_tokens, self.system_prompt)
+            text_response = self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt)
+            self.logger.info(f"Model response: {text_response}")
 
-            self.logger.info(f"Model response: {response}")
+            valid = True
+            if as_json:
+                try:
+                    response = json.loads(text_response)
+                except json.JSONDecodeError:
+                    valid = False
+            else:
+                response = text_response
 
-            if validate_func(response):
-                self.temperature = original_temp
+            if valid and validate_func is not None and not validate_func(response):
+                valid = False
+
+            if valid:
+                messages.append({"role": "assistant", "content": text_response})
                 return response
 
-            self.temperature = min(self.temperature + 0.1, 1.0)
-            # Remove the last two messages from self.messages
-            if len(self.messages) > 1:
-                self.messages.pop()
-                self.messages.pop()
+            temperature = min(temperature + 0.1, 1.0)
             self.logger.warning(f"Invalid response. Increasing temperature to {self.temperature}")
 
         # If we've reached this point, even t=1.0 didn't work
@@ -60,16 +70,17 @@ class Model(ABC):
         response, _ = self.chat_completion(test_message, [], self.model_name, self.temperature, self.max_tokens, self.system_prompt)
         return response
 
+
 class OllamaModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 5000, logger=None):
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
 
     @staticmethod
-    def chat_completion(user_message: str, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, system_prompt: str) -> Tuple[str, List[Dict[str, str]]]:
-        messages.append({"role": "user", "content": user_message})
-
-        if system_prompt and messages[0]["role"] != "system":
-            messages.insert(0, {"role": "system", "content": system_prompt})
+    def chat_completion(messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, system_prompt: str) -> Tuple[str, List[Dict[str, str]]]:
+        if messages and messages[0]["role"] == "system":
+            messages = messages[1:]
+        if system_prompt:
+            messages = [{"role": "system", "content": system_prompt}] + messages
 
         url = "http://localhost:11434/api/chat"
         headers = {
@@ -90,12 +101,12 @@ class OllamaModel(Model):
         text_response = ""
         if response.status_code == 200:
             text_response = response.json()["message"]["content"]
-            messages.append({"role": "assistant", "content": text_response})
         else:
             text_response = f"Error: {response.status_code}"
 
-        return text_response, messages
+        return text_response
     
+
 class AnthropicModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
         if model_name == "opus":
@@ -109,9 +120,8 @@ class AnthropicModel(Model):
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
     
     @staticmethod
-    def chat_completion(user_message, messages=[], model='claude-3-haiku-20240307', temperature=0.0, max_tokens=1024, system_prompt=""):
+    def chat_completion(messages=[], model='claude-3-haiku-20240307', temperature=0.0, max_tokens=1024, system_prompt=""):
         try:
-            messages.append({"role": "user", "content": user_message})
             chat_completion = anthropic.Anthropic().messages.create(
                 system=system_prompt,
                 model=model,
@@ -121,11 +131,12 @@ class AnthropicModel(Model):
             )
 
             text_response = chat_completion.content[0].text
-            messages.append({"role": "assistant", "content": text_response})
-            return text_response, messages
+            return text_response
+
         except Exception as e:
             print("Error: " + str(e))
             return "Error querying the LLM: " + str(e), messages
+
 
 class OpenAIModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
@@ -142,13 +153,13 @@ class OpenAIModel(Model):
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         self.client = OpenAI()
     
-    def chat_completion(self, user_message, messages=[], model='gpt-4o-mini-2024-07-18', temperature=0.0, max_tokens=1024, system_prompt=""):
-        try:
-            messages.append({"role": "user", "content": user_message})
+    def chat_completion(self, messages=[], model='gpt-4o-mini-2024-07-18', temperature=0.0, max_tokens=1024, system_prompt=""):
+        if messages and messages[0]["role"] == "system":
+            messages = messages[1:]
+        if system_prompt:
+            messages = [{"role": "system", "content": system_prompt}] + messages
 
-            if system_prompt and messages[0]["role"] != "system":
-                messages.insert(0, {"role": "system", "content": system_prompt})
-                
+        try:
             chat_completion = self.client.chat.completions.create(
                 messages=messages,
                 model=model,
@@ -157,8 +168,8 @@ class OpenAIModel(Model):
             )
 
             text_response = chat_completion.choices[0].message.content
-            messages.append({"role": "assistant", "content": text_response})
-            return text_response, messages
+            return text_response
+
         except Exception as e:
             print("Error: " + str(e))
             return "Error querying the LLM: " + str(e), messages
