@@ -107,7 +107,7 @@ class Assistant:
             session_path.parent.mkdir(exist_ok=True)
 
             session_file = session_path.open('w')
-            session_file.write(json.dumps({"role": "system", "content": system_prompt}))
+            session_file.write(json.dumps({"role": "system", "content": system_prompt}) + '\n')
             session_file.flush()
 
         session.messages_file = session_file
