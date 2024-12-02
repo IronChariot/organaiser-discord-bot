@@ -73,7 +73,7 @@ def run_discord_bot(session, config, token, self_prompt_interval):
 
             # Cancel if activity occurred in the meantime
             print(f'Checking in due to user inactivity.')
-            await respond(f'[{datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")}] SYSTEM: No response within given period.')
+            await respond(f'[{datetime.now(tz=timezone.utc).strftime("%H:%M:%S")}] SYSTEM: No response within given period.')
         except asyncio.CancelledError:
             print('Checkin task was cancelled')
             return
@@ -107,7 +107,7 @@ def run_discord_bot(session, config, token, self_prompt_interval):
             return
 
         if message.channel == chat_channel:
-            await respond(f'[{datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")}] {message.author.display_name}: {message.content}', message)
+            await respond(f'[{datetime.now(tz=timezone.utc).strftime("%H:%M:%S")}] {message.author.display_name}: {message.content}', message)
 
     # Every self_prompt_interval minutes, prompt the model with the timestamp, asking for a response if one is appropriate
     @tasks.loop(minutes=self_prompt_interval)
@@ -115,7 +115,7 @@ def run_discord_bot(session, config, token, self_prompt_interval):
         global chat_channel, log_channel, self_prompt
         
         # The self prompt should include a timestamp, then the self_prompt text.
-        this_self_prompt = f'[{datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")}] {self_prompt}'
+        this_self_prompt = f'[{datetime.now(tz=timezone.utc).strftime("%H:%M:%S")}] {self_prompt}'
         await respond(this_self_prompt)
 
     client.run(token)
