@@ -167,3 +167,6 @@ userids.json
 # Ignore .toml files
 *.toml
 *.jsonl
+
+# Anything in the diaries directory
+diaries/

@@ -10,12 +10,13 @@ with open('diary_prompt.txt', 'r') as f:
 
 
 class Session:
-    def __init__(self, date, model, system_prompt=None):
+    def __init__(self, date, model, system_prompt=None, assistant_id="naiser"):
         self.date = date
         self.model = model
         self.messages_file = None
         self.message_history = []
         self.last_activity = datetime.now()
+        self.assistant_id = assistant_id
         if system_prompt:
             self.message_history.append({"role": "system", "content": system_prompt})
 
@@ -63,7 +64,7 @@ class Session:
 
     def write_diary_entry(self):
         response = self.isolated_query("SYSTEM: " + DIARY_PROMPT)
-        with open(f'diaries/cosmo-{self.date.isoformat()}.txt', 'w') as fh:
+        with open(f'diaries/{self.assistant_id}-{self.date.isoformat()}.txt', 'w') as fh:
             fh.write(response)
 
         return response
