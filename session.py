@@ -5,9 +5,13 @@ from datetime import datetime
 with open('session_format_prompt.txt', 'r') as f:
     FORMAT_PROMPT = f.read()
 
+with open('diary_prompt.txt', 'r') as f:
+    DIARY_PROMPT = f.read()
+
 
 class Session:
-    def __init__(self, model, system_prompt=None):
+    def __init__(self, date, model, system_prompt=None):
+        self.date = date
         self.model = model
         self.messages_file = None
         self.message_history = []
@@ -42,7 +46,7 @@ class Session:
         self.messages_file.flush()
         return response
 
-    def isolated_query(self, query, format_prompt=None):
+    def isolated_query(self, query, format_prompt=None, as_json=False):
         # Runs an isolated query on this session.
         system_prompt = self.message_history[0]["content"]
 
@@ -52,7 +56,14 @@ class Session:
         print("Isolated query:", query)
 
         messages = self.message_history + [{"role": "user", "content": query}]
-        response = self.model.query(messages, system_prompt=system_prompt)
+        response = self.model.query(messages, system_prompt=system_prompt, as_json=as_json)
 
         print("Response:", response)
+        return response
+
+    def write_diary_entry(self):
+        response = self.isolated_query("SYSTEM: " + DIARY_PROMPT)
+        with open(f'diaries/cosmo-{self.date.isoformat()}.txt', 'w') as fh:
+            fh.write(response)
+
         return response

@@ -77,7 +77,7 @@ class Assistant:
 
             session_path = SESSION_DIR / f'{self.id}-{date.isoformat()}.jsonl'
             if session_path.is_file():
-                session = Session(self.model)
+                session = Session(date, self.model)
 
                 for line in session_path.open('r'):
                     line = line.strip()
@@ -93,7 +93,7 @@ class Assistant:
 
         if session_path.is_file():
             session_file = session_path.open('r+')
-            session = Session(self.model)
+            session = Session(date, self.model)
             session.last_activity = datetime.fromtimestamp(session_path.stat().st_mtime, tz=timezone.utc)
 
             for line in session_file:
@@ -102,7 +102,7 @@ class Assistant:
                     session.message_history.append(json.loads(line))
         else:
             system_prompt = self.make_system_prompt(date)
-            session = Session(self.model, system_prompt)
+            session = Session(date, self.model, system_prompt)
 
             session_path.parent.mkdir(exist_ok=True)
 

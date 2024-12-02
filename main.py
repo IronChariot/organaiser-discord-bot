@@ -29,6 +29,7 @@ def run_discord_bot(session, config, token, self_prompt_interval):
     chat_channel = None
     log_channel = None
     current_checkin_task = None
+    diary_channel = None
 
     async def respond(content, message=None):
         """Respond to input from the user or the system."""
@@ -86,8 +87,10 @@ def run_discord_bot(session, config, token, self_prompt_interval):
 
         chat_channel_name = config.get('chat_channel')
         log_channel_name = config.get('log_channel')
+        diary_channel_name = config.get('diary_channel')
         chat_channel = discord.utils.get(client.get_all_channels(), name=chat_channel_name) if chat_channel_name else None
         log_channel = discord.utils.get(client.get_all_channels(), name=log_channel_name) if log_channel_name else None
+        diary_channel = discord.utils.get(client.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
         self_prompt = open('self_prompt.txt', 'r').read()
 
         response = session.get_last_assistant_response()
