@@ -25,7 +25,7 @@ class Model(ABC):
         for attempt in range(max_attempts):
             if attempt > 0:
                 self.logger.info(f"Querying model (Attempt {attempt + 1}, Temperature: {temperature})")
-            self.logger.info(f"User message: {messages[1]["content"]}")
+            self.logger.info(f"User message: {messages[-1]['content']}")
 
             text_response = self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt)
             self.logger.info(f"Model response: {text_response}")
@@ -47,7 +47,7 @@ class Model(ABC):
                 return response
 
             temperature = min(temperature + 0.1, 1.0)
-            self.logger.warning(f"Invalid response. Increasing temperature to {self.temperature}")
+            self.logger.warning(f"Invalid response. Increasing temperature to {temperature}")
 
         # If we've reached this point, even t=1.0 didn't work
         self.logger.error("Failed to get a valid response even at maximum temperature.")
@@ -57,11 +57,12 @@ class Model(ABC):
         """
         Reset the conversation history.
         """
-        self.messages = []
+        pass
 
-    def chat_completion(self):
+    @abstractmethod
+    def chat_completion(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, system_prompt: str) -> str:
         """
-        Get a chat completion from the model.
+        Send a message to the model and get a response.
         """
         pass
 
@@ -109,25 +110,30 @@ class OllamaModel(Model):
 
 class AnthropicModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
-        if model_name == "opus":
+        if model_name == "claude-opus":
             model_name = "claude-3-opus-20240229" # $15/$75
-        elif model_name == "sonnet":
+        elif model_name == "claude-sonnet":
             model_name = "claude-3-5-sonnet-20241022" # $3/$15
-        elif model_name == "haiku":
-            model_name = "claude-3-haiku-20240307" # $0.25/1.25
+        elif model_name == "claude-haiku":
+            model_name = "claude-3-5-haiku-20241022" # $1/$5
         else: # Default to sonnet model
             model_name = "claude-3-5-sonnet-20241022"
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
     
     @staticmethod
     def chat_completion(messages=[], model='claude-3-haiku-20240307', temperature=0.0, max_tokens=1024, system_prompt=""):
+        # Check if the first message is a system message - if it is, we need to not pass it to Anthropic
+        clean_messages = messages
+        if messages and messages[0]["role"] == "system":
+            clean_messages = messages[1:]
+
         try:
             chat_completion = anthropic.Anthropic().messages.create(
                 system=system_prompt,
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
-                messages=messages
+                messages=clean_messages
             )
 
             text_response = chat_completion.content[0].text
@@ -135,19 +141,19 @@ class AnthropicModel(Model):
 
         except Exception as e:
             print("Error: " + str(e))
-            return "Error querying the LLM: " + str(e), messages
+            return "Error querying the LLM: " + str(e)
 
 
 class OpenAIModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
         if model_name == "gpt-4o":
-            model_name = "gpt-4o-2024-08-06" # $2.5/$10
+            model_name = "gpt-4o-2024-11-20" # $2.5/$10
         elif model_name == "gpt-4o-mini":
             model_name = "gpt-4o-mini-2024-07-18" # $0.15/$0.6
         elif model_name == "gpt-4":
             model_name = "gpt-4-turbo-2024-04-09" # $10/$30
         elif model_name == "gpt-3.5":
-            model_name = "gpt-3.5-turbo-0125" # $0.5/$1.5
+            model_name = "gpt-3.5-turbo-1106" # $0.5/$1.5
         else:
             model_name = "gpt-4o-mini-2024-07-18"  # Default to GPT-4o Mini
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
@@ -172,4 +178,4 @@ class OpenAIModel(Model):
 
         except Exception as e:
             print("Error: " + str(e))
-            return "Error querying the LLM: " + str(e), messages
+            return "Error querying the LLM: " + str(e)

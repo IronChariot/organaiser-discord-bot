@@ -166,3 +166,4 @@ userids.json
 
 # Ignore .toml files
 *.toml
+*.jsonl
