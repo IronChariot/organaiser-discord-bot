@@ -1,10 +1,15 @@
-import tomllib
 import pathlib
 import json
+import sys
 from datetime import datetime, timezone, timedelta
 
 import models
 from session import Session
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    from pip._vendor import tomli
 
 SESSION_DIR = pathlib.Path(__file__).parent.resolve() / 'sessions'
 
@@ -20,7 +25,10 @@ class Assistant:
 
     @staticmethod
     def load(ident):
-        data = tomllib.load(open(ident + '.toml', 'rb'))
+        if sys.version_info >= (3, 11):
+            data = tomllib.load(open(ident + '.toml', 'rb'))
+        else:
+            data = tomli.load(open(ident + '.toml', 'r'))
         ident = data.get('id', ident)
 
         model_name = data['model']
