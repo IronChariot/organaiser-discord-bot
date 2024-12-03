@@ -3,6 +3,7 @@ import json
 from datetime import date, datetime, timedelta, timezone
 import discord
 import asyncio
+from io import StringIO
 
 from assistant import Assistant
 
@@ -21,7 +22,12 @@ def run_discord_bot(session, config, token):
         diary_channel = discord.utils.get(client.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
 
         if diary_channel:
-            await diary_channel.send(session.write_diary_entry())
+            entry = session.write_diary_entry()
+            if len(entry) > 2000:
+                buf = StringIO(entry)
+                await diary_channel.send(file=discord.File(buf, filename="diary.txt"))
+            else:
+                await diary_channel.send(entry)
             sys.exit(0)
         else:
             print('No diary channel configured or found.')
