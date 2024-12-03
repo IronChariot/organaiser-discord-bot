@@ -1,5 +1,6 @@
 name = "Naiser"
 model = "claude-sonnet"
+timezone = "Europe/London"
 token_count = 2048
 
 [discord]
