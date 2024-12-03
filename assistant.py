@@ -2,6 +2,7 @@ import pathlib
 import json
 import sys
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 import models
 from session import Session
@@ -22,6 +23,7 @@ class Assistant:
         self.max_tokens = 1024
         self.prompt_template = []
         self.discord_config = {}
+        self.timezone = None
 
     @staticmethod
     def load(ident):
@@ -44,6 +46,8 @@ class Assistant:
             ass.temperature = data['temperature']
         if 'max_tokens' in data:
             ass.max_tokens = data['max_tokens']
+        if 'timezone' in data:
+            ass.timezone = ZoneInfo(data['timezone'])
         ass.prompt_template = data['system_prompt']
         ass.discord_config = data['discord']
         return ass

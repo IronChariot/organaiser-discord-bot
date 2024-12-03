@@ -19,7 +19,7 @@ def run_local(session):
         print("\n" + response.get("chat") or response.get("react") or "(no response)")
 
 
-def run_discord_bot(session, config, token, self_prompt_interval):
+def run_discord_bot(assistant, session, token, self_prompt_interval):
     intents = discord.Intents.default()
     intents.message_content = True
     intents.members = True
@@ -35,6 +35,9 @@ def run_discord_bot(session, config, token, self_prompt_interval):
         """Respond to input from the user or the system."""
 
         global chat_channel, log_channel, current_checkin_task
+
+        timestamp = datetime.now(tz=assistant.timezone).strftime("%H:%M:%S")
+        content = f'[{timestamp}] {content}'
 
         response = session.chat(content)
         response_time = datetime.now(tz=timezone.utc)
@@ -74,7 +77,7 @@ def run_discord_bot(session, config, token, self_prompt_interval):
 
             # Cancel if activity occurred in the meantime
             print(f'Checking in due to user inactivity.')
-            await respond(f'[{datetime.now(tz=timezone.utc).strftime("%H:%M:%S")}] SYSTEM: No response within given period.')
+            await respond(f'SYSTEM: No response within given period.')
         except asyncio.CancelledError:
             print('Checkin task was cancelled')
             return
@@ -85,6 +88,7 @@ def run_discord_bot(session, config, token, self_prompt_interval):
 
         global chat_channel, log_channel, self_prompt_interval, self_prompt
 
+        config = assistant.discord_config
         chat_channel_name = config.get('chat_channel')
         log_channel_name = config.get('log_channel')
         diary_channel_name = config.get('diary_channel')
@@ -110,16 +114,14 @@ def run_discord_bot(session, config, token, self_prompt_interval):
             return
 
         if message.channel == chat_channel:
-            await respond(f'[{datetime.now(tz=timezone.utc).strftime("%H:%M:%S")}] {message.author.display_name}: {message.content}', message)
+            await respond(f'{message.author.display_name}: {message.content}', message)
 
     # Every self_prompt_interval minutes, prompt the model with the timestamp, asking for a response if one is appropriate
     @tasks.loop(minutes=self_prompt_interval)
     async def regular_self_prompt():
         global chat_channel, log_channel, self_prompt
         
-        # The self prompt should include a timestamp, then the self_prompt text.
-        this_self_prompt = f'[{datetime.now(tz=timezone.utc).strftime("%H:%M:%S")}] {self_prompt}'
-        await respond(this_self_prompt)
+        await respond(self_prompt)
 
     client.run(token)
 
@@ -136,7 +138,7 @@ if __name__ == '__main__':
         self_prompt_interval = int(sys.argv[2])
 
     if token and assistant.discord_config:
-        run_discord_bot(session, assistant.discord_config, token=token, self_prompt_interval=self_prompt_interval)
+        run_discord_bot(assistant, session, token=token, self_prompt_interval=self_prompt_interval)
     else:
         print("No Discord configuration; running locally.")
         run_local(session)
