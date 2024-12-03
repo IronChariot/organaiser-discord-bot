@@ -20,21 +20,27 @@ def run_local(session):
 
 
 def run_discord_bot(assistant, session, token, self_prompt_interval):
+    chat_channel = None
+    log_channel = None
+    diary_channel = None
+    current_checkin_task = None
+    startup_checkin_deadline = None
+
+    self_prompt = open('self_prompt.txt', 'r').read()
+
+    response = session.get_last_assistant_response()
+    if response and 'prompt_after' in response:
+        startup_checkin_deadline = session.last_activity + timedelta(minutes=response['prompt_after'])
+
     intents = discord.Intents.default()
     intents.message_content = True
     intents.members = True
     client = discord.Client(intents=intents)
 
-    self_prompt = None
-    chat_channel = None
-    log_channel = None
-    current_checkin_task = None
-    diary_channel = None
-
     async def respond(content, message=None):
         """Respond to input from the user or the system."""
 
-        global chat_channel, log_channel, current_checkin_task
+        nonlocal chat_channel, log_channel, current_checkin_task
 
         timestamp = datetime.now(tz=assistant.timezone).strftime("%H:%M:%S")
         content = f'[{timestamp}] {content}'
@@ -86,7 +92,8 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
     async def on_ready():
         print(f'{client.user} has connected to Discord!')
 
-        global chat_channel, log_channel, self_prompt_interval, self_prompt
+        nonlocal chat_channel, log_channel, diary_channel
+        nonlocal current_checkin_task, startup_checkin_deadline
 
         config = assistant.discord_config
         chat_channel_name = config.get('chat_channel')
@@ -95,20 +102,18 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
         chat_channel = discord.utils.get(client.get_all_channels(), name=chat_channel_name) if chat_channel_name else None
         log_channel = discord.utils.get(client.get_all_channels(), name=log_channel_name) if log_channel_name else None
         diary_channel = discord.utils.get(client.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
-        self_prompt = open('self_prompt.txt', 'r').read()
 
-        response = session.get_last_assistant_response()
-        if response and 'prompt_after' in response:
-            deadline = session.last_activity + timedelta(minutes=response['prompt_after'])
-            print("Next check-in at", deadline)
-            asyncio.create_task(perform_checkin(deadline))
+        if startup_checkin_deadline:
+            print("Next check-in at", startup_checkin_deadline)
+            current_checkin_task = asyncio.create_task(perform_checkin(startup_checkin_deadline))
+            startup_checkin_deadline = None
 
         if self_prompt_interval:
             regular_self_prompt.start()
 
     @client.event
     async def on_message(message):
-        global chat_channel
+        nonlocal chat_channel
 
         if message.author == client.user:
             return
@@ -119,8 +124,6 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
     # Every self_prompt_interval minutes, prompt the model with the timestamp, asking for a response if one is appropriate
     @tasks.loop(minutes=self_prompt_interval)
     async def regular_self_prompt():
-        global chat_channel, log_channel, self_prompt
-        
         await respond(self_prompt)
 
     client.run(token)
