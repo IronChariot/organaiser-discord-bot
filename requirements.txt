@@ -2,3 +2,4 @@ discord
 requests
 anthropic
 openai
+python-daemon

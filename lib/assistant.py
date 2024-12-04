@@ -1,7 +1,7 @@
 import pathlib
 import json
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, time, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 from . import models
@@ -24,6 +24,20 @@ class Assistant:
         self.prompt_template = []
         self.discord_config = {}
         self.timezone = None
+        self.rollover = None
+
+    def get_today(self):
+        "Returns the current date, respecting the configured rollover."
+        now = datetime.now(tz=self.timezone)
+        today = now.date()
+        if self.rollover:
+            if self.rollover >= time(12):
+                if now.time() >= self.rollover:
+                    today += timedelta(days=1)
+            else:
+                if now.time() < self.rollover:
+                    today -= timedelta(days=1)
+        return today
 
     @staticmethod
     def load(ident):
@@ -48,6 +62,8 @@ class Assistant:
             ass.max_tokens = data['max_tokens']
         if 'timezone' in data:
             ass.timezone = ZoneInfo(data['timezone'])
+        if 'rollover' in data:
+            ass.rollover = data['rollover']
         ass.prompt_template = data['system_prompt']
         ass.discord_config = data['discord']
         return ass

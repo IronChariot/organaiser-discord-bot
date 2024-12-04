@@ -1,7 +1,8 @@
 name = "Naiser"
 model = "claude-sonnet"
-timezone = "Europe/London"
 token_count = 2048
+timezone = "Europe/London"
+rollover = 04:00:00
 
 [discord]
 chat_channel = "naiser"
