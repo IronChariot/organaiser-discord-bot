@@ -4,7 +4,7 @@ import sys
 import discord
 from discord.ext import commands
 from discord.ext import tasks
-from models import Model, OllamaModel, AnthropicModel, OpenAIModel
+from lib.models import Model, OllamaModel, AnthropicModel, OpenAIModel
 from utilities import setup_logging
 import json
 

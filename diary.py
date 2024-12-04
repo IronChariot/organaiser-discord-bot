@@ -5,7 +5,7 @@ import discord
 import asyncio
 from io import StringIO
 
-from assistant import Assistant
+from lib.assistant import Assistant
 
 
 def run_discord_bot(session, config, token):

@@ -5,7 +5,7 @@ import discord
 from discord.ext import tasks
 import asyncio
 
-from assistant import Assistant
+from lib.assistant import Assistant
 
 
 def run_local(session):

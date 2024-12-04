@@ -4,8 +4,8 @@ import sys
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
-import models
-from session import Session
+from . import models
+from .session import Session
 
 if sys.version_info >= (3, 11):
     import tomllib
