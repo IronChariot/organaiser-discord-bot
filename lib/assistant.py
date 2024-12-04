@@ -12,7 +12,7 @@ if sys.version_info >= (3, 11):
 else:
     from pip._vendor import tomli
 
-SESSION_DIR = pathlib.Path(__file__).parent.resolve() / 'sessions'
+SESSION_DIR = pathlib.Path(__file__).parent.parent.resolve() / 'sessions'
 
 
 class Assistant:
