@@ -155,19 +155,22 @@ def main():
     args = parser.parse_args()
 
     assistant = Assistant.load(args.assistant)
-    session = assistant.load_session(date.fromisoformat(args.date) if args.date else assistant.get_today())
+
+    # Make sure there isn't already an instance running of this assistant
+    pidfile_path = os.path.abspath(f"{assistant.id}.pid")
+    if os.path.isfile(pidfile_path):
+        with open(pidfile_path) as pidf:
+            pid = pidf.read()
+        print(f"Assistant {args.assistant} is already running (pid={pid}). Delete {pidfile_path} if this is not the case")
+        sys.exit(1)
+
+    with pidfile:
+        session = assistant.load_session(date.fromisoformat(args.date) if args.date else assistant.get_today())
 
     token = os.environ.get('DISCORD_TOKEN')
     self_prompt_interval = args.interval
 
     if token and assistant.discord_config:
-        pidfile_path = os.path.abspath(f"{assistant.id}.pid")
-        if os.path.isfile(pidfile_path):
-            with open(pidfile_path) as pidf:
-                pid = pidf.read()
-            print(f"Assistant {args.assistant} is already running (pid={pid}). Delete {pidfile_path} if this is not the case")
-            sys.exit(1)
-
         if args.daemonize:
             import daemon
             print("Spawning daemon.")
