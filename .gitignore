@@ -163,9 +163,10 @@ cython_debug/
 # Ignore the 'userids.json' file
 userids.json
 
-# Ignore .toml files
+# Ignore .toml/.jsonl files and .pid files
 *.toml
 *.jsonl
+*.pid
 
 # Anything in the diaries directory
 diaries/
