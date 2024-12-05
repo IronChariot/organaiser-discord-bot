@@ -6,7 +6,10 @@ import argparse
 import discord
 from discord.ext import tasks
 import asyncio
-import daemon
+import platform
+
+if platform.system() != "Windows":
+    import daemon
 
 from lib.assistant import Assistant
 
@@ -166,7 +169,7 @@ def main():
             print(f"Assistant {args.assistant} is already running (pid={pid}). Delete {pidfile_path} if this is not the case")
             sys.exit(1)
 
-        if args.daemonize:
+        if args.daemonize and platform.system() != "Windows":
             print("Spawning daemon.")
 
             with daemon.DaemonContext():
