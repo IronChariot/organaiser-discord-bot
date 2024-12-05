@@ -55,10 +55,13 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
                 await chat_channel.send(response['chat'])
 
             if 'react' in response:
+                reactions = response['react']
+                reactions = reactions.encode('utf-16', 'surrogatepass').decode('utf-16')
                 if message:
-                    await message.add_reaction(response['react'])
+                    for react in reactions:
+                        await message.add_reaction(react)
                 elif 'chat' not in response:
-                    await chat_channel.send(response['chat'])
+                    await chat_channel.send(reactions)
 
         if log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
