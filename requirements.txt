@@ -2,4 +2,4 @@ discord
 requests
 anthropic
 openai
-python-daemon
+python-daemon; sys_platform != 'win32'
