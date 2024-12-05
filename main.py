@@ -164,7 +164,7 @@ def main():
         print(f"Assistant {args.assistant} is already running (pid={pid}). Delete {pidfile_path} if this is not the case")
         sys.exit(1)
 
-    with pidfile:
+    with pidfile(pidfile_path):
         session = assistant.load_session(date.fromisoformat(args.date) if args.date else assistant.get_today())
 
     token = os.environ.get('DISCORD_TOKEN')
