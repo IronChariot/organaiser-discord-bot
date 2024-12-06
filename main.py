@@ -8,6 +8,7 @@ from discord.ext import tasks
 import asyncio
 
 from lib.assistant import Assistant
+from lib.util import split_message
 
 
 def run_local(session):
@@ -52,7 +53,8 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
 
         if chat_channel:
             if 'chat' in response:
-                await chat_channel.send(response['chat'])
+                for part in split_message(response['chat']):
+                    await chat_channel.send(part)
 
             if 'react' in response:
                 reactions = response['react']

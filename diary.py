@@ -3,9 +3,9 @@ import json
 from datetime import date, datetime, timedelta, timezone
 import discord
 import asyncio
-from io import StringIO
 
 from lib.assistant import Assistant
+from lib.util import split_message
 
 
 def run_discord_bot(session, config, token):
@@ -23,11 +23,8 @@ def run_discord_bot(session, config, token):
 
         if diary_channel:
             entry = session.write_diary_entry()
-            if len(entry) > 2000:
-                buf = StringIO(entry)
-                await diary_channel.send(file=discord.File(buf, filename="diary.txt"))
-            else:
-                await diary_channel.send(entry)
+            for part in split_message(entry):
+                await diary_channel.send(part)
             sys.exit(0)
         else:
             print('No diary channel configured or found.')
