@@ -6,10 +6,6 @@ import argparse
 import discord
 from discord.ext import tasks
 import asyncio
-import platform
-
-if platform.system() != "Windows":
-    import daemon
 
 from lib.assistant import Assistant
 
@@ -59,10 +55,13 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
                 await chat_channel.send(response['chat'])
 
             if 'react' in response:
+                reactions = response['react']
+                reactions = reactions.encode('utf-16', 'surrogatepass').decode('utf-16')
                 if message:
-                    await message.add_reaction(response['react'])
+                    for react in reactions:
+                        await message.add_reaction(react)
                 elif 'chat' not in response:
-                    await chat_channel.send(response['chat'])
+                    await chat_channel.send(reactions)
 
         if log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
@@ -156,20 +155,24 @@ def main():
     args = parser.parse_args()
 
     assistant = Assistant.load(args.assistant)
-    session = assistant.load_session(date.fromisoformat(args.date) if args.date else assistant.get_today())
+
+    # Make sure there isn't already an instance running of this assistant
+    pidfile_path = os.path.abspath(f"{assistant.id}.pid")
+    if os.path.isfile(pidfile_path):
+        with open(pidfile_path) as pidf:
+            pid = pidf.read()
+        print(f"Assistant {args.assistant} is already running (pid={pid}). Delete {pidfile_path} if this is not the case")
+        sys.exit(1)
+
+    with pidfile(pidfile_path):
+        session = assistant.load_session(date.fromisoformat(args.date) if args.date else assistant.get_today())
 
     token = os.environ.get('DISCORD_TOKEN')
     self_prompt_interval = args.interval
 
     if token and assistant.discord_config:
-        pidfile_path = os.path.abspath(f"{assistant.id}.pid")
-        if os.path.isfile(pidfile_path):
-            with open(pidfile_path) as pidf:
-                pid = pidf.read()
-            print(f"Assistant {args.assistant} is already running (pid={pid}). Delete {pidfile_path} if this is not the case")
-            sys.exit(1)
-
-        if args.daemonize and platform.system() != "Windows":
+        if args.daemonize:
+            import daemon
             print("Spawning daemon.")
 
             with daemon.DaemonContext():
