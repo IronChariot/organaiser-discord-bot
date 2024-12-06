@@ -1,4 +1,4 @@
 Write a diary entry about the day. Prefix it with a markdown header including
 the current date. Use proper capitalization for this post. What has he been
 up to today? How did he feel? How was his energy level? What went well and
-what went less well?
+what went less well? Refer to the user in the third person.
