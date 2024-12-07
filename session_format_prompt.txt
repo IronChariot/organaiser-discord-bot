@@ -18,3 +18,13 @@ the "react" key containing an emoji.
 It MUST also contain a key "prompt_after", containing an integer number of
 minutes after which you will be prompted to take an action by the SYSTEM if
 they have not sent you a message within that time.
+
+It may optionally contain a key "timed_reminder_time", containing a datetime
+in the format "YYYY-MM-DD HH:MM:SS" at which you will be reminded to take an
+action by the SYSTEM. If you do specify this, you should also specify a key
+"timed_reminder_text", containing a string that will be used as the message
+to remind you of something. It may optionally contain a key "timed_reminder_repeat",
+which will be a boolean value that indicates whether you should be reminded
+repeatedly. If you include this key, you should also include a key
+"timed_reminder_repeat_interval", which will be a string value that indicates
+how often to repeat the reminder, which should be one of "day" or "week".

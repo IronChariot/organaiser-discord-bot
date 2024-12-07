@@ -167,6 +167,7 @@ userids.json
 *.toml
 *.jsonl
 *.pid
+*.pickle
 
 # Anything in the diaries directory
 diaries/

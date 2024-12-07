@@ -9,7 +9,7 @@ import asyncio
 
 from lib.assistant import Assistant
 from lib.util import split_message
-
+from lib.reminders import Reminders, Reminder
 
 def run_local(session):
     response = session.get_last_assistant_response()
@@ -28,6 +28,7 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
     diary_channel = None
     current_checkin_task = None
     startup_checkin_deadline = None
+    reminders = Reminders()
 
     self_prompt = open('self_prompt.txt', 'r').read()
 
@@ -81,6 +82,23 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
             deadline = response_time + timedelta(minutes=response['prompt_after'])
             current_checkin_task = asyncio.create_task(perform_checkin(deadline))
 
+        if 'timed_reminder_time' in response:
+            # Set up a timed reminder
+            # Parse the time as a datetime:
+            reminder_time = datetime.fromisoformat(response['timed_reminder_time'])
+            # Make the reminder time local to UTC
+            reminder_time = reminder_time.astimezone(timezone.utc)
+            reminder_text = response['timed_reminder_text']
+            repeat = response.get('timed_reminder_repeat', False)
+            repeat_interval = response.get('timed_reminder_repeat_interval', 'day')
+
+            reminders.add_reminder(Reminder(reminder_time, reminder_text, repeat, repeat_interval))
+            reminders.save()
+
+            # If the reminder is for later today, set up a task to send it
+            if reminder_time.date() == date.today():
+                asyncio.create_task(send_reminder(Reminder(reminder_time, reminder_text, repeat, repeat_interval)))
+
 
     async def perform_checkin(deadline):
         try:
@@ -94,6 +112,30 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
         except asyncio.CancelledError:
             print('Checkin task was cancelled')
             return
+        
+    async def send_reminder(reminder: Reminder):
+        nonlocal reminders
+
+        begin_time = datetime.now(tz=timezone.utc)
+        if reminder.time > begin_time:
+            await asyncio.sleep((reminder.time - begin_time).total_seconds())
+
+        print(f'Sending reminder for {reminder.time}: {reminder.text}')
+        await respond(f'SYSTEM: REMINDER: {reminder.text}')
+
+        # If the reminder repeats, set up a new reminder for the next time (after 1 interval):
+        if reminder.repeat:
+            if reminder.repeat_interval == 'day':
+                new_time = reminder.time + timedelta(days=1)
+            elif reminder.repeat_interval == 'week':
+                new_time = reminder.time + timedelta(weeks=1)
+            reminders.add_reminder(Reminder(new_time, reminder.text, repeat=True, repeat_interval=reminder.repeat_interval))
+        else:
+            # Remove the reminder from the list
+            reminders.remove_reminder(reminder.time, reminder.text)
+        
+        # Persist the reminders
+        reminders.save()
 
     @client.event
     async def on_ready():
@@ -101,6 +143,7 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
 
         nonlocal chat_channel, log_channel, diary_channel
         nonlocal current_checkin_task, startup_checkin_deadline
+        nonlocal reminders
 
         config = assistant.discord_config
         chat_channel_name = config.get('chat_channel')
@@ -117,6 +160,12 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
 
         if self_prompt_interval:
             regular_self_prompt.start()
+
+        # Set up reminders for today
+        reminders = reminders.load()
+
+        for reminder in reminders.todays_reminders():
+            asyncio.create_task(send_reminder(reminder))
 
     @client.event
     async def on_message(message):
@@ -146,7 +195,6 @@ def pidfile(path):
     finally:
         if os.path.isfile(path):
             os.unlink(path)
-
 
 def main():
     parser = argparse.ArgumentParser()
