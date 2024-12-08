@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Tuple
 import anthropic
 from openai import OpenAI
-
+import os
 
 class Model(ABC):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0, max_tokens: int = 1024, logger=None):
@@ -118,6 +118,7 @@ class AnthropicModel(Model):
             model_name = "claude-3-5-haiku-20241022" # $1/$5
         else: # Default to sonnet model
             model_name = "claude-3-5-sonnet-20241022"
+            print("Invalid model specified. Defaulting to claude-3-5-sonnet-20241022.")
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
     
     @staticmethod
@@ -156,6 +157,7 @@ class OpenAIModel(Model):
             model_name = "gpt-3.5-turbo-1106" # $0.5/$1.5
         else:
             model_name = "gpt-4o-mini-2024-07-18"  # Default to GPT-4o Mini
+            print("Invalid model specified. Defaulting to GPT-4o Mini.")
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         self.client = OpenAI()
     
@@ -173,6 +175,44 @@ class OpenAIModel(Model):
                 max_tokens=max_tokens
             )
 
+            text_response = chat_completion.choices[0].message.content
+            return text_response
+
+        except Exception as e:
+            print("Error: " + str(e))
+            return "Error querying the LLM: " + str(e)
+
+class OpenRouterModel(Model):
+    def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
+        if model_name == "openrouter-llama-3.1":
+            model_name = "meta-llama/llama-3.1-405b-instruct" # free
+        elif model_name == "openrouter-llama-3.3":
+            model_name = "meta-llama/llama-3.3-70b-instruct" # $0.13/M input tokens / $0.4/M output tokens
+        elif model_name == "openrouter-qwen":
+            model_name = "qwen/qwen-2.5-72b-instruct" # $0.23/M input tokens / $0.4/M output tokens
+        else:
+            model_name = "meta-llama/llama-3.1-405b-instruct"  # Default to the free Llama 3.1 API (while it's free?)
+            print("Invalid model specified. Defaulting to meta-llama/llama-3.1-405b-instruct.")
+        super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
+        OR_API_KEY = os.getenv('OPENROUTER_API_KEY')
+        self.client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OR_API_KEY
+        )
+    
+    def chat_completion(self, messages=[], model='meta-llama/llama-3.1-405b-instruct', temperature=0.0, max_tokens=1024, system_prompt=""):
+        if messages and messages[0]["role"] == "system":
+            messages = messages[1:]
+        if system_prompt:
+            messages = [{"role": "system", "content": system_prompt}] + messages
+
+        try:
+            chat_completion = self.client.chat.completions.create(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
             text_response = chat_completion.choices[0].message.content
             return text_response
 

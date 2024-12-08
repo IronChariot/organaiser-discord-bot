@@ -52,6 +52,8 @@ class Assistant:
             model = models.AnthropicModel(model_name)
         elif model_name.startswith('gpt-'):
             model = models.OpenAIModel(model_name)
+        elif model_name.startswith('openrouter-'):
+            model = models.OpenRouterModel(model_name)
         else:
             model = models.OllamaModel(model_name)
 
