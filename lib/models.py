@@ -35,7 +35,12 @@ class Model(ABC):
                 try:
                     response = json.loads(text_response)
                 except json.JSONDecodeError:
-                    valid = False
+                    # Some models surround JSON with triple backticks, so remove those and try again:
+                    text_response = text_response.replace("`", "")
+                    try:
+                        response = json.loads(text_response)
+                    except json.JSONDecodeError:
+                        valid = False
             else:
                 response = text_response
 
@@ -47,6 +52,7 @@ class Model(ABC):
                 return response
 
             temperature = min(temperature + 0.1, 1.0)
+            self.logger.warning(f"Response: {text_response}")
             self.logger.warning(f"Invalid response. Increasing temperature to {temperature}")
 
         # If we've reached this point, even t=1.0 didn't work
