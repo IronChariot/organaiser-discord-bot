@@ -33,13 +33,14 @@ class Session:
                 continue
 
         return None
-    
+
     def should_summarise(self):
         """Determines if the message history needs summarisation."""
         # Check if we have more than self.assistant.summarisation_threshold messages
-        if len(self.message_history) > self.assistant.summarisation_threshold:
+        if self.assistant.summarisation_threshold is not None and \
+           len(self.message_history) > self.assistant.summarisation_threshold:
             return True
-        
+
         return False
 
     def create_summary(self):

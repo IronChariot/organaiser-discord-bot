@@ -24,7 +24,7 @@ class Assistant:
         self.max_tokens = 1024
         self.prompt_template = []
         self.discord_config = {}
-        self.summarisation_threshold = 1000
+        self.summarisation_threshold = None
         self.unsummarised_messages = 1000
         self.timezone = None
         self.rollover = None
@@ -71,9 +71,9 @@ class Assistant:
         if 'rollover' in data:
             ass.rollover = data['rollover']
         ass.prompt_template = data['system_prompt']
-        ass.discord_config = data['discord']
-        ass.summarisation_threshold = data['summarisation_threshold']
-        ass.unsummarised_messages = data['unsummarised_messages']
+        ass.discord_config = data.get('discord', {})
+        ass.summarisation_threshold = data.get('summarisation_threshold')
+        ass.unsummarised_messages = data.get('unsummarised_messages', 1000)
 
         # Load reminders from file
         ass.reminders.load()
