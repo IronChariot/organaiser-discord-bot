@@ -26,6 +26,7 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
     chat_channel = None
     log_channel = None
     diary_channel = None
+    query_channel = None
     current_checkin_task = None
     startup_checkin_deadline = None
     reminders = Reminders()
@@ -141,7 +142,7 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
     async def on_ready():
         print(f'{client.user} has connected to Discord!')
 
-        nonlocal chat_channel, log_channel, diary_channel
+        nonlocal chat_channel, log_channel, diary_channel, query_channel
         nonlocal current_checkin_task, startup_checkin_deadline
         nonlocal reminders
 
@@ -149,9 +150,11 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
         chat_channel_name = config.get('chat_channel')
         log_channel_name = config.get('log_channel')
         diary_channel_name = config.get('diary_channel')
+        query_channel_name = config.get('query_channel')
         chat_channel = discord.utils.get(client.get_all_channels(), name=chat_channel_name) if chat_channel_name else None
         log_channel = discord.utils.get(client.get_all_channels(), name=log_channel_name) if log_channel_name else None
         diary_channel = discord.utils.get(client.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
+        query_channel = discord.utils.get(client.get_all_channels(), name=query_channel_name) if query_channel_name else None
 
         if startup_checkin_deadline:
             print("Next check-in at", startup_checkin_deadline)
@@ -169,13 +172,21 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
 
     @client.event
     async def on_message(message):
-        nonlocal chat_channel
+        nonlocal chat_channel, query_channel
 
         if message.author == client.user:
             return
 
         if message.channel == chat_channel:
             await respond(f'{message.author.display_name}: {message.content}', message)
+
+        if message.channel == query_channel:
+            reply = session.isolated_query(message.content)
+            if reply.startswith('{'):
+                await query_channel.send(f'```json\n{reply}\n```')
+            else:
+                await query_channel.send(reply)
+
 
     # Every self_prompt_interval minutes, prompt the model with the timestamp, asking for a response if one is appropriate
     @tasks.loop(minutes=self_prompt_interval)
