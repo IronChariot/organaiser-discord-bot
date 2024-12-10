@@ -32,15 +32,14 @@ class Model(ABC):
 
             valid = True
             if as_json:
+                # Some models surround JSON with triple backticks
+                if text_response.startswith('```json'):
+                    text_response = text_response[7:]
+                text_response = text_response.strip('`\n\t ')
                 try:
-                    response = json.loads(text_response)
+                    response = json.loads(text_response, strict=False)
                 except json.JSONDecodeError:
-                    # Some models surround JSON with triple backticks, so remove those and try again:
-                    text_response = text_response.replace("`", "")
-                    try:
-                        response = json.loads(text_response)
-                    except json.JSONDecodeError:
-                        valid = False
+                    valid = False
             else:
                 response = text_response
 
