@@ -227,16 +227,19 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
             return
 
         if message.channel == chat_channel:
-            await respond(f'{message.author.display_name}: {message.content}', message)
+            async with message.channel.typing():
+                await respond(f'{message.author.display_name}: {message.content}', message)
 
         if message.channel == query_channel:
-            reply = session.isolated_query(message.content)
-            if reply.startswith('{'):
-                for part in split_message(reply, 2000 - 12):
-                    await query_channel.send(f'```json\n{part}\n```')
-            else:
-                for part in split_message(reply, 2000):
-                    await query_channel.send(part)
+            async with message.channel.typing():
+                reply = session.isolated_query(message.content)
+
+                if reply.startswith('{'):
+                    for part in split_message(reply, 2000 - 12):
+                        await query_channel.send(f'```json\n{part}\n```')
+                else:
+                    for part in split_message(reply, 2000):
+                        await query_channel.send(part)
 
     # Every self_prompt_interval minutes, prompt the model with the timestamp, asking for a response if one is appropriate
     @tasks.loop(minutes=self_prompt_interval)
