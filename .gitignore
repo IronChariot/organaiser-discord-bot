@@ -171,3 +171,6 @@ userids.json
 
 # Anything in the diaries directory
 diaries/
+
+# The user profile
+*_user_profile.txt

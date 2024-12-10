@@ -28,7 +28,6 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
     diary_channel = None
     current_checkin_task = None
     startup_checkin_deadline = None
-    reminders = Reminders()
 
     self_prompt = open('self_prompt.txt', 'r').read()
 
@@ -59,12 +58,14 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
 
             if 'react' in response:
                 reactions = response['react']
-                reactions = reactions.encode('utf-16', 'surrogatepass').decode('utf-16')
-                if message:
-                    for react in reactions:
-                        await message.add_reaction(react)
-                elif 'chat' not in response:
-                    await chat_channel.send(reactions)
+                # Check if reactions is not None
+                if reactions is not None:
+                    reactions = reactions.encode('utf-16', 'surrogatepass').decode('utf-16')
+                    if message:
+                        for react in reactions:
+                            await message.add_reaction(react)
+                    elif 'chat' not in response:
+                        await chat_channel.send(reactions)
 
         if log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
@@ -82,6 +83,21 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
             deadline = response_time + timedelta(minutes=response['prompt_after'])
             current_checkin_task = asyncio.create_task(perform_checkin(deadline))
 
+        # Take care of the todo list and long term goals list
+        if 'todo_action' in response:
+            todo_action = response['todo_action']
+            todo_text = response['todo_text']
+            # Check if todo_text is a string, or a list of strings:
+            todo_text_list = [todo_text] if isinstance(todo_text, str) else todo_text
+            await update_todo(todo_action, todo_text_list)
+
+        if 'long_term_goals_action' in response:
+            long_term_goal_action = response['long_term_goals_action']
+            long_term_goal_text = response['long_term_goals_text']
+            # Check if long_term_goal_text is a string, or a list of strings:
+            long_term_goal_text_list = [long_term_goal_text] if isinstance(long_term_goal_text, str) else long_term_goal_text
+            await update_long_term_goals(long_term_goal_action, long_term_goal_text_list)
+
         if 'timed_reminder_time' in response:
             # Set up a timed reminder
             # Parse the time as a datetime:
@@ -92,13 +108,54 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
             repeat = response.get('timed_reminder_repeat', False)
             repeat_interval = response.get('timed_reminder_repeat_interval', 'day')
 
-            reminders.add_reminder(Reminder(reminder_time, reminder_text, repeat, repeat_interval))
-            reminders.save()
+            assistant.reminders.add_reminder(Reminder(reminder_time, reminder_text, repeat, repeat_interval))
 
             # If the reminder is for later today, set up a task to send it
             if reminder_time.date() == date.today():
                 asyncio.create_task(send_reminder(Reminder(reminder_time, reminder_text, repeat, repeat_interval)))
 
+    async def update_todo(todo_action, todo_text_list):
+        # Get the list of existing todos, if any:
+        with open('todo.json', 'r') as fh:
+            todos_json = fh.read()
+        todos_list = json.loads(todos_json)
+
+        if todo_action == 'add':
+            for todo_text in todo_text_list:
+                todos_list.append(todo_text)
+            # Write the dict back to file
+            with open('todo.json', 'w') as fh:
+                fh.write(json.dumps(todos_list))
+        elif todo_action == 'remove':
+            for todo_text in todo_text_list:
+                if todo_text in todos_list:
+                    todos_list.remove(todo_text)
+                # Also correctly deal with it if the bot put the whole '- ' at the front of the todo text
+                elif todo_text.startswith('- ') and todo_text[2:] in todos_list:
+                    todos_list.remove(todo_text[2:])
+            # Write the dict back to file
+            with open('todo.json', 'w') as fh:
+                fh.write(json.dumps(todos_list))
+
+    async def update_long_term_goals(long_term_goal_action, long_term_goal_text_list):
+        # Get the list of existing long term goals, if any:
+        with open('long_term_goals.json', 'r') as fh:
+            long_term_goals_json = fh.read()
+        long_term_goals_dict = json.loads(long_term_goals_json)
+
+        if long_term_goal_action == 'add':
+            for long_term_goal_text in long_term_goal_text_list:
+                long_term_goals_dict[long_term_goal_text] = True
+            # Write the dict back to file
+            with open('long_term_goals.json', 'w') as fh:
+                fh.write(json.dumps(long_term_goals_dict))
+        elif long_term_goal_action == 'remove':
+            for long_term_goal_text in long_term_goal_text_list:
+                if long_term_goal_text in long_term_goals_dict:
+                    del long_term_goals_dict[long_term_goal_text]
+            # Write the dict back to file
+            with open('long_term_goals.json', 'w') as fh:
+                fh.write(json.dumps(long_term_goals_dict))
 
     async def perform_checkin(deadline):
         try:
@@ -114,14 +171,13 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
             return
         
     async def send_reminder(reminder: Reminder):
-        nonlocal reminders
 
         begin_time = datetime.now(tz=timezone.utc)
         if reminder.time > begin_time:
             await asyncio.sleep((reminder.time - begin_time).total_seconds())
 
-        print(f'Sending reminder for {reminder.time}: {reminder.text}')
-        await respond(f'SYSTEM: REMINDER: {reminder.text}')
+        print(f'Setting reminder for {reminder.time}: {reminder.text}')
+        await respond(f'SYSTEM: Reminder from your past self now going off: {reminder.text}')
 
         # If the reminder repeats, set up a new reminder for the next time (after 1 interval):
         if reminder.repeat:
@@ -129,13 +185,10 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
                 new_time = reminder.time + timedelta(days=1)
             elif reminder.repeat_interval == 'week':
                 new_time = reminder.time + timedelta(weeks=1)
-            reminders.add_reminder(Reminder(new_time, reminder.text, repeat=True, repeat_interval=reminder.repeat_interval))
+            assistant.reminders.add_reminder(Reminder(new_time, reminder.text, repeat=True, repeat_interval=reminder.repeat_interval))
         else:
             # Remove the reminder from the list
-            reminders.remove_reminder(reminder.time, reminder.text)
-        
-        # Persist the reminders
-        reminders.save()
+            assistant.reminders.remove_reminder(reminder.time, reminder.text)
 
     @client.event
     async def on_ready():
@@ -143,7 +196,6 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
 
         nonlocal chat_channel, log_channel, diary_channel
         nonlocal current_checkin_task, startup_checkin_deadline
-        nonlocal reminders
 
         config = assistant.discord_config
         chat_channel_name = config.get('chat_channel')
@@ -161,10 +213,7 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
         if self_prompt_interval:
             regular_self_prompt.start()
 
-        # Set up reminders for today
-        reminders = reminders.load()
-
-        for reminder in reminders.todays_reminders():
+        for reminder in assistant.reminders.todays_reminders():
             asyncio.create_task(send_reminder(reminder))
 
     @client.event
@@ -200,7 +249,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", dest="daemonize", action="store_true", help="daemonize the process (runs in the background)")
     parser.add_argument("--date", help="make or continue the session for a give date (in YYYY-MM-DD format)")
-    parser.add_argument("assistant", help="name of the .toml file of the assistant to run, without .toml extension")
+    parser.add_argument("assistant", help="name of the .toml file of the assistant to run, without .toml extension", nargs='?', default='naiser')
     parser.add_argument("interval", type=int, nargs="?", help="self prompt interval")
     args = parser.parse_args()
 

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from . import models
 from .session import Session
+from .reminders import Reminders
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -23,8 +24,11 @@ class Assistant:
         self.max_tokens = 1024
         self.prompt_template = []
         self.discord_config = {}
+        self.summarisation_threshold = 1000
+        self.unsummarised_messages = 1000
         self.timezone = None
         self.rollover = None
+        self.reminders = Reminders()
 
     def get_today(self):
         "Returns the current date, respecting the configured rollover."
@@ -68,6 +72,12 @@ class Assistant:
             ass.rollover = data['rollover']
         ass.prompt_template = data['system_prompt']
         ass.discord_config = data['discord']
+        ass.summarisation_threshold = data['summarisation_threshold']
+        ass.unsummarised_messages = data['unsummarised_messages']
+
+        # Load reminders from file
+        ass.reminders.load()
+
         return ass
 
     def make_system_prompt(self, date):
@@ -94,6 +104,11 @@ class Assistant:
                     response = last_session.isolated_query(f'SYSTEM: {question}')
                     prompt.append(response.strip())
 
+            elif component['type'] == 'user_profile':
+                # Get the user profile text from {assistant_name}_user_profile.txt:
+                with open(f'{self.id}_user_profile.txt', 'r') as fh:
+                    prompt.append(fh.read().strip())
+
             elif heading:
                 prompt.append('Not yet implemented.')
 
@@ -107,7 +122,7 @@ class Assistant:
 
             session_path = SESSION_DIR / f'{self.id}-{date.isoformat()}.jsonl'
             if session_path.is_file():
-                session = Session(date, self.model, assistant_id=self.id)
+                session = Session(date, self)
 
                 for line in session_path.open('r'):
                     line = line.strip()
@@ -123,7 +138,7 @@ class Assistant:
 
         if session_path.is_file():
             session_file = session_path.open('r+')
-            session = Session(date, self.model, assistant_id=self.id)
+            session = Session(date, self)
             session.last_activity = datetime.fromtimestamp(session_path.stat().st_mtime, tz=timezone.utc)
 
             for line in session_file:
@@ -132,7 +147,7 @@ class Assistant:
                     session.message_history.append(json.loads(line))
         else:
             system_prompt = self.make_system_prompt(date)
-            session = Session(date, self.model, system_prompt, assistant_id=self.id)
+            session = Session(date, self, system_prompt)
 
             session_path.parent.mkdir(exist_ok=True)
 

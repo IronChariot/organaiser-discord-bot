@@ -1,0 +1,7 @@
+Please create a concise summary of the following conversation, focusing on:
+- Actions taken
+- Key emotional states and changes
+- Important decisions or commitments
+- Significant topics discussed
+- Any set reminders or patterns
+Keep only the most relevant information for maintaining conversation context. If any of the above do not apply, do not mention them.
