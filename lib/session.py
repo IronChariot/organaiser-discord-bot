@@ -1,5 +1,8 @@
 import json
+import pathlib
 from datetime import datetime
+
+DIARIES_DIR = pathlib.Path(__file__).parent.parent.resolve() / 'diaries'
 
 # Format prompt comes from session_format_prompt.txt
 with open('session_format_prompt.txt', 'r') as f:
@@ -176,9 +179,15 @@ class Session:
         print("Response:", response)
         return response
 
+    @property
+    def diary_path(self):
+        return DIARIES_DIR / f'{self.assistant.id}-{self.date.isoformat()}.txt'
+
     def write_diary_entry(self):
         response = self.isolated_query("SYSTEM: " + DIARY_PROMPT)
-        with open(f'diaries/{self.assistant.id}-{self.date.isoformat()}.txt', 'w') as fh:
+        path = self.diary_path
+        path.parent.mkdir(exist_ok=True)
+        with open(path, 'w') as fh:
             fh.write(response)
 
         return response
