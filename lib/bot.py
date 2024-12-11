@@ -49,6 +49,8 @@ class Bot(discord.Client):
         self.current_checkin_task = None
         self.startup_checkin_deadline = None
 
+        self.rollover_lock = asyncio.Lock()
+
         response = session.get_last_assistant_response()
         if response and 'prompt_after' in response:
             self.startup_checkin_deadline = session.last_activity + \
@@ -197,7 +199,7 @@ class Bot(discord.Client):
         except asyncio.CancelledError:
             print('Checkin task was cancelled')
             return
-        
+
     async def send_reminder(self, reminder: Reminder):
         begin_time = datetime.now(tz=timezone.utc)
         if reminder.time > begin_time:
@@ -258,3 +260,48 @@ class Bot(discord.Client):
                     reply = f'```json\n{reply}\n```'
 
                 await send_split_message(self.query_channel, reply)
+
+    @tasks.loop(reconnect=True)
+    async def check_rollover(self):
+        date = self.assistant.get_today()
+        if date == self.session.date:
+            print(f'Not rolling over, date is still {date}')
+            return
+
+        futures = []
+
+        # Grab lock and check again in case this method is being called multiple
+        # times simultaneously somehow
+        async with self.rollover_lock:
+            old_session = self.session
+            if date == old_session.date:
+                print(f'Not rolling over, date is still {date}')
+                return
+
+            await self.change_presence(status=discord.Status.dnd)
+
+            print(f'Rolling over to day {date}')
+            if self.log_channel:
+                await self.log_channel.send(f'Beginning rollover to day {date}')
+
+            self.session = await self.assistant.load_session(date, old_session)
+
+            if not old_session.diary_path.exists():
+                entry = await old_session.write_diary_entry()
+
+                if self.diary_channel:
+                    futures.append(send_split_message(self.diary_channel, entry))
+
+            futures.append(self.change_presence(status=discord.Status.online))
+
+        if self.log_channel:
+            futures.append(self.log_channel.send(f'Finished rollover to day {date}'))
+
+        if futures:
+            await asyncio.gather(*futures)
+
+    async def setup_hook(self):
+        rollover_time = self.assistant.rollover.replace(tzinfo=self.assistant.timezone)
+        print(f'Date is {self.session.date}, next rollover scheduled at {rollover_time}')
+        self.check_rollover.change_interval(time=rollover_time)
+        self.check_rollover.start()

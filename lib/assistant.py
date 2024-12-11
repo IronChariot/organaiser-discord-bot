@@ -1,6 +1,7 @@
 import pathlib
 import json
 import sys
+import asyncio
 from datetime import datetime, time, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -70,6 +71,8 @@ class Assistant:
             ass.timezone = ZoneInfo(data['timezone'])
         if 'rollover' in data:
             ass.rollover = data['rollover']
+        if not ass.rollover:
+            ass.rollover = time(0, 0)
         ass.prompt_template = data['system_prompt']
         ass.discord_config = data.get('discord', {})
         ass.summarisation_threshold = data.get('summarisation_threshold')
@@ -80,10 +83,25 @@ class Assistant:
 
         return ass
 
-    async def make_system_prompt(self, date):
+    async def make_system_prompt(self, date, last_session=None):
         prompt = []
-        last_session = self.find_session_before(date)
-        preface = f"It is now {date.strftime('%A, %d %B %Y')} (the next day)."
+        if last_session is None:
+            last_session = self.find_session_before(date)
+
+        # Let the AI know what day it is relative to the day it's based on
+        date_str = date.strftime('%A, %d %B %Y')
+        if last_session:
+            delta = date - last_session.date
+            if delta.days == 1:
+                preface = f"It is now {date_str} (the next day)."
+            elif delta.days > 1:
+                preface = f"It is now {date_str} ({delta.days} days later)."
+            else:
+                # Huh?
+                preface = f"It is now {date_str}."
+        else:
+            preface = f"It is now {date_str}."
+
         for component in self.prompt_template:
             heading = component.get('heading')
             if heading:
@@ -152,12 +170,12 @@ class Assistant:
         else:
             return None
 
-    async def load_session(self, date):
+    async def load_session(self, date, last_session=None):
         session = self.load_existing_session(date)
         if session:
             return session
 
-        system_prompt = await self.make_system_prompt(date)
+        system_prompt = await self.make_system_prompt(date, last_session=last_session)
         session = Session(date, self, system_prompt)
 
         session_path = SESSION_DIR / f'{self.id}-{date.isoformat()}.jsonl'
