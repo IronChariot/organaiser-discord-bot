@@ -213,6 +213,10 @@ class Bot(discord.Client):
                 new_time = reminder.time + timedelta(days=1)
             elif reminder.repeat_interval == 'week':
                 new_time = reminder.time + timedelta(weeks=1)
+            elif reminder.repeat_interval == 'month':
+                new_time = reminder.time + timedelta(months=1)
+            elif reminder.repeat_interval == 'year':
+                new_time = reminder.time + timedelta(years=1)
             self.assistant.reminders.add_reminder(Reminder(new_time, reminder.text, repeat=True, repeat_interval=reminder.repeat_interval))
         else:
             # Remove the reminder from the list
