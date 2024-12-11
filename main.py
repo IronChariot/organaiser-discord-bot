@@ -169,14 +169,26 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
                 fh.write(json.dumps(long_term_goals_dict))
 
     async def perform_checkin(deadline):
+        nonlocal current_checkin_task
+
         try:
             begin_time = datetime.now(tz=timezone.utc)
+            seconds_left = 0
             if deadline > begin_time:
-                await asyncio.sleep((deadline - begin_time).total_seconds())
+                seconds_left = (deadline - begin_time).total_seconds()
+                await asyncio.sleep(seconds_left)
 
-            # Cancel if activity occurred in the meantime
-            print(f'Checking in due to user inactivity.')
-            await respond(f'SYSTEM: No response within given period.')
+            # Unassign this otherwise respond() will cancel us
+            current_checkin_task = None
+
+            minutes = int(round(seconds_left / 60))
+            print(f'Checking in due to user inactivity for {minutes} minutes.')
+            if minutes == 0:
+                await respond(f'(Immediately thereafter…)')
+            elif minutes == 1:
+                await respond(f'(One minute later…)')
+            else:
+                await respond(f'({minutes} minutes later…)')
         except asyncio.CancelledError:
             print('Checkin task was cancelled')
             return
