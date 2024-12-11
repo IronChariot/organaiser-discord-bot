@@ -1,3 +1,0 @@
-Is there anything that you should remind the user to do, or ask about in terms of progress, mood, etc? 
-If you have already done this recently, or have been conversing recently, this is probably not required, 
-unless a deadline is coming up unrelated to recent conversation.
