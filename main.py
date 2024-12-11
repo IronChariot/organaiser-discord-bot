@@ -22,9 +22,34 @@ def run_local(session):
         print("\n" + (response.get("chat") or response.get("react") or "(no response)"))
 
 
+MESSAGE_LIMIT = 2000
+
 async def send_split_message(channel, message):
-    for part in split_message(message):
-        await channel.send(part)
+    limit = MESSAGE_LIMIT
+    if len(message) > limit and '```' in message:
+        # Hard case, preserve preformatted blocks across split messages.
+        parts = list(split_message(message, limit-12))
+        blocks = 0
+        for part in parts:
+            part_blocks = part.count('```')
+
+            if blocks % 2 != 0:
+                part = '```json\n' + part
+
+            blocks += part_blocks
+
+            if blocks % 2 != 0:
+                part = part.rstrip('\n')
+                if part.endswith('```') or part.endswith('```json'):
+                    part = part.rstrip('json').rstrip('`\n')
+                else:
+                    part = part + '\n```'
+
+            await channel.send(part)
+    else:
+        # Simple case
+        for part in split_message(message, limit):
+            await channel.send(part)
 
 
 def run_discord_bot(assistant, session, token, self_prompt_interval):
@@ -77,7 +102,7 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
 
         if log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
-            futures.append(log_channel.send(f'> {quoted_message}\n```json\n{json.dumps(response, indent=4)}\n```'))
+            futures.append(send_split_message(log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```'))
 
         if 'prompt_after' in response:
             # If there's an existing checkin task, cancel it
@@ -257,10 +282,10 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
                 reply = await session.isolated_query(message.content)
 
                 if reply.startswith('{'):
-                    for part in split_message(reply, 2000 - 12):
+                    for part in split_message(reply, MESSAGE_LIMIT - 12):
                         await query_channel.send(f'```json\n{part}\n```')
                 else:
-                    for part in split_message(reply, 2000):
+                    for part in split_message(reply, MESSAGE_LIMIT):
                         await query_channel.send(part)
 
     # Every self_prompt_interval minutes, prompt the model with the timestamp, asking for a response if one is appropriate
