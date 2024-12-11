@@ -83,6 +83,7 @@ class Assistant:
     def make_system_prompt(self, date):
         prompt = []
         last_session = self.find_session_before(date)
+        preface = f"It is now {date.strftime('%A, %d %B %Y')} (the next day)."
         for component in self.prompt_template:
             heading = component.get('heading')
             if heading:
@@ -101,7 +102,7 @@ class Assistant:
             elif component['type'] == 'question':
                 question = component['question'].strip()
                 if last_session:
-                    response = last_session.isolated_query(f'SYSTEM: {question}')
+                    response = last_session.isolated_query(f'SYSTEM: {preface} {question}')
                     prompt.append(response.strip())
 
             elif component['type'] == 'user_profile':
