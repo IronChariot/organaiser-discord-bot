@@ -49,8 +49,6 @@ class Bot(discord.Client):
         self.current_checkin_task = None
         self.startup_checkin_deadline = None
 
-        self.rollover_lock = asyncio.Lock()
-
         response = session.get_last_assistant_response()
         if response and 'prompt_after' in response:
             self.startup_checkin_deadline = session.last_activity + \
@@ -301,6 +299,8 @@ class Bot(discord.Client):
             await asyncio.gather(*futures)
 
     async def setup_hook(self):
+        self.rollover_lock = asyncio.Lock()
+
         rollover_time = self.assistant.rollover.replace(tzinfo=self.assistant.timezone)
         print(f'Date is {self.session.date}, next rollover scheduled at {rollover_time}')
         self.check_rollover.change_interval(time=rollover_time)
