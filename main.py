@@ -1,5 +1,4 @@
 import sys, os
-import json
 from contextlib import contextmanager
 import argparse
 import asyncio

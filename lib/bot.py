@@ -1,4 +1,3 @@
-import sys, os
 import json
 from datetime import date, datetime, time, timedelta, timezone
 import discord
