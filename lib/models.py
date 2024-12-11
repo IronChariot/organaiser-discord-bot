@@ -7,6 +7,7 @@ import anthropic
 from openai import AsyncOpenAI
 import os
 
+
 class Model(ABC):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0, max_tokens: int = 1024, logger=None):
         self.model_name = model_name
@@ -96,7 +97,7 @@ class OllamaModel(Model):
                 "num_predict": max_tokens
             }
         }
-        
+
         response = requests.post(url, headers=headers, data=json.dumps(data))
 
         text_response = ""
@@ -106,7 +107,7 @@ class OllamaModel(Model):
             text_response = f"Error: {response.status_code}"
 
         return text_response
-    
+
 
 class AnthropicModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
@@ -160,7 +161,7 @@ class OpenAIModel(Model):
             print("Invalid model specified. Defaulting to GPT-4o Mini.")
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         self.client = AsyncOpenAI()
-    
+
     async def chat_completion(self, messages=[], model='gpt-4o-mini-2024-07-18', temperature=0.0, max_tokens=1024, system_prompt=""):
         if messages and messages[0]["role"] == "system":
             messages = messages[1:]
@@ -182,6 +183,7 @@ class OpenAIModel(Model):
             print("Error: " + str(e))
             return "Error querying the LLM: " + str(e)
 
+
 class OpenRouterModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
         if model_name == "openrouter-llama-3.1":
@@ -199,7 +201,7 @@ class OpenRouterModel(Model):
             base_url="https://openrouter.ai/api/v1",
             api_key=OR_API_KEY
         )
-    
+
     async def chat_completion(self, messages=[], model='meta-llama/llama-3.1-405b-instruct', temperature=0.0, max_tokens=1024, system_prompt=""):
         if messages and messages[0]["role"] == "system":
             messages = messages[1:]
