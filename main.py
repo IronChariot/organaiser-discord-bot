@@ -70,7 +70,8 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
                     reactions = reactions.encode('utf-16', 'surrogatepass').decode('utf-16')
                     if message:
                         for react in reactions:
-                            futures.append(message.add_reaction(react))
+                            if not react.isspace():
+                                futures.append(message.add_reaction(react))
                     elif 'chat' not in response:
                         futures.append(chat_channel.send(reactions))
 
