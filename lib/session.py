@@ -125,15 +125,16 @@ class Session:
                 self.messages_file.write(json.dumps(message) + '\n')
             self.messages_file.flush()
 
-    def chat(self, content):
+    async def chat(self, content):
+        "User or system sends a message.  Returns AI response (as JSON)."
+
         # Check if we need to summarise before adding new message
         if self.should_summarise():
             self.create_summary()
 
-        # User or system sends a message.  Returns AI response (as JSON).
         self.last_activity = datetime.now()
 
-                # First, get the contents of the todo file and long term goals file
+        # First, get the contents of the todo file and long term goals file
         with open('todo.json', 'r') as fh:
             todo_json = fh.read()
         todo_dict = json.loads(todo_json)
@@ -157,14 +158,14 @@ class Session:
 
         self.message_history.append({"role": "user", "content": content})
 
-        response = self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
+        response = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
 
         self.messages_file.write(f'{json.dumps(self.message_history[-2])}\n')
         self.messages_file.write(f'{json.dumps(self.message_history[-1])}\n')
         self.messages_file.flush()
         return response
 
-    def isolated_query(self, query, format_prompt=None, as_json=False):
+    async def isolated_query(self, query, format_prompt=None, as_json=False):
         # Runs an isolated query on this session.
         system_prompt = self.message_history[0]["content"]
 
@@ -174,7 +175,7 @@ class Session:
         print("Isolated query:", query)
 
         messages = self.message_history + [{"role": "user", "content": query}]
-        response = self.assistant.model.query(messages, system_prompt=system_prompt, as_json=as_json)
+        response = await self.assistant.model.query(messages, system_prompt=system_prompt, as_json=as_json)
 
         print("Response:", response)
         return response
@@ -183,8 +184,8 @@ class Session:
     def diary_path(self):
         return DIARIES_DIR / f'{self.assistant.id}-{self.date.isoformat()}.txt'
 
-    def write_diary_entry(self):
-        response = self.isolated_query("SYSTEM: " + DIARY_PROMPT)
+    async def write_diary_entry(self):
+        response = await self.isolated_query("SYSTEM: " + DIARY_PROMPT)
         path = self.diary_path
         path.parent.mkdir(exist_ok=True)
         with open(path, 'w') as fh:

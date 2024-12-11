@@ -80,7 +80,7 @@ class Assistant:
 
         return ass
 
-    def make_system_prompt(self, date):
+    async def make_system_prompt(self, date):
         prompt = []
         last_session = self.find_session_before(date)
         preface = f"It is now {date.strftime('%A, %d %B %Y')} (the next day)."
@@ -102,7 +102,7 @@ class Assistant:
             elif component['type'] == 'question':
                 question = component['question'].strip()
                 if last_session:
-                    response = last_session.isolated_query(f'SYSTEM: {preface} {question}')
+                    response = await last_session.isolated_query(f'SYSTEM: {preface} {question}')
                     prompt.append(response.strip())
 
             elif component['type'] == 'user_profile':
@@ -134,27 +134,38 @@ class Assistant:
 
         return None
 
-    def load_session(self, date):
+    def load_existing_session(self, date):
         session_path = SESSION_DIR / f'{self.id}-{date.isoformat()}.jsonl'
 
         if session_path.is_file():
             session_file = session_path.open('r+')
             session = Session(date, self)
             session.last_activity = datetime.fromtimestamp(session_path.stat().st_mtime, tz=timezone.utc)
+            session.messages_file = session_file
 
             for line in session_file:
                 line = line.strip()
                 if line:
                     session.message_history.append(json.loads(line))
+
+            return session
         else:
-            system_prompt = self.make_system_prompt(date)
-            session = Session(date, self, system_prompt)
+            return None
 
-            session_path.parent.mkdir(exist_ok=True)
+    async def load_session(self, date):
+        session = self.load_existing_session(date)
+        if session:
+            return session
 
-            session_file = session_path.open('w')
-            session_file.write(json.dumps({"role": "system", "content": system_prompt}) + '\n')
-            session_file.flush()
+        system_prompt = await self.make_system_prompt(date)
+        session = Session(date, self, system_prompt)
+
+        session_path = SESSION_DIR / f'{self.id}-{date.isoformat()}.jsonl'
+        session_path.parent.mkdir(exist_ok=True)
+
+        session_file = session_path.open('w')
+        session_file.write(json.dumps({"role": "system", "content": system_prompt}) + '\n')
+        session_file.flush()
 
         session.messages_file = session_file
         return session

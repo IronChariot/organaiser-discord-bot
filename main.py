@@ -18,8 +18,13 @@ def run_local(session):
 
     while True:
         message = input("> ")
-        response = session.chat(message)
+        response = asyncio.run(session.chat(message))
         print("\n" + (response.get("chat") or response.get("react") or "(no response)"))
+
+
+async def send_split_message(channel, message):
+    for part in split_message(message):
+        await channel.send(part)
 
 
 def run_discord_bot(assistant, session, token, self_prompt_interval):
@@ -49,13 +54,14 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
         timestamp = datetime.now(tz=assistant.timezone).strftime("%H:%M:%S")
         content = f'[{timestamp}] {content}'
 
-        response = session.chat(content)
+        response = await session.chat(content)
         response_time = datetime.now(tz=timezone.utc)
+
+        futures = []
 
         if chat_channel:
             if 'chat' in response:
-                for part in split_message(response['chat']):
-                    await chat_channel.send(part)
+                futures.append(send_split_message(chat_channel, response['chat']))
 
             if 'react' in response:
                 reactions = response['react']
@@ -64,13 +70,13 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
                     reactions = reactions.encode('utf-16', 'surrogatepass').decode('utf-16')
                     if message:
                         for react in reactions:
-                            await message.add_reaction(react)
+                            futures.append(message.add_reaction(react))
                     elif 'chat' not in response:
-                        await chat_channel.send(reactions)
+                        futures.append(chat_channel.send(reactions))
 
         if log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
-            await log_channel.send(f'> {quoted_message}\n```json\n{json.dumps(response, indent=4)}\n```')
+            futures.append(log_channel.send(f'> {quoted_message}\n```json\n{json.dumps(response, indent=4)}\n```'))
 
         if 'prompt_after' in response:
             # If there's an existing checkin task, cancel it
@@ -90,14 +96,14 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
             todo_text = response['todo_text']
             # Check if todo_text is a string, or a list of strings:
             todo_text_list = [todo_text] if isinstance(todo_text, str) else todo_text
-            await update_todo(todo_action, todo_text_list)
+            futures.append(update_todo(todo_action, todo_text_list))
 
         if 'long_term_goals_action' in response:
             long_term_goal_action = response['long_term_goals_action']
             long_term_goal_text = response['long_term_goals_text']
             # Check if long_term_goal_text is a string, or a list of strings:
             long_term_goal_text_list = [long_term_goal_text] if isinstance(long_term_goal_text, str) else long_term_goal_text
-            await update_long_term_goals(long_term_goal_action, long_term_goal_text_list)
+            futures.append(update_long_term_goals(long_term_goal_action, long_term_goal_text_list))
 
         if 'timed_reminder_time' in response:
             # Set up a timed reminder
@@ -114,6 +120,9 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
             # If the reminder is for later today, set up a task to send it
             if reminder_time.date() == date.today():
                 asyncio.create_task(send_reminder(Reminder(reminder_time, reminder_text, repeat, repeat_interval)))
+
+        if futures:
+            await asyncio.gather(*futures)
 
     async def update_todo(todo_action, todo_text_list):
         # Get the list of existing todos, if any:
@@ -232,7 +241,7 @@ def run_discord_bot(assistant, session, token, self_prompt_interval):
 
         if message.channel == query_channel:
             async with message.channel.typing():
-                reply = session.isolated_query(message.content)
+                reply = await session.isolated_query(message.content)
 
                 if reply.startswith('{'):
                     for part in split_message(reply, 2000 - 12):
@@ -279,7 +288,7 @@ def main():
         sys.exit(1)
 
     with pidfile(pidfile_path):
-        session = assistant.load_session(date.fromisoformat(args.date) if args.date else assistant.get_today())
+        session = asyncio.run(assistant.load_session(date.fromisoformat(args.date) if args.date else assistant.get_today()))
 
     token = os.environ.get('DISCORD_TOKEN')
     self_prompt_interval = args.interval

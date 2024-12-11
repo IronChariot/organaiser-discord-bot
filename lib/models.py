@@ -4,7 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Tuple
 import anthropic
-from openai import OpenAI
+from openai import AsyncOpenAI
 import os
 
 class Model(ABC):
@@ -15,7 +15,7 @@ class Model(ABC):
         self.max_tokens = max_tokens
         self.logger = logger or logging.getLogger(__name__)
 
-    def query(self, messages: List[Dict[str, str]], system_prompt=None, validate_func=None, as_json=False) -> str:
+    async def query(self, messages: List[Dict[str, str]], system_prompt=None, validate_func=None, as_json=False) -> str:
         temperature = self.temperature
         max_attempts = int((1.0 - temperature) / 0.1) + 1  # Calculate max attempts to reach t=1.0
 
@@ -27,7 +27,7 @@ class Model(ABC):
                 self.logger.info(f"Querying model (Attempt {attempt + 1}, Temperature: {temperature})")
             self.logger.info(f"User message: {messages[-1]['content']}")
 
-            text_response = self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt)
+            text_response = await self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt)
             self.logger.info(f"Model response: {text_response}")
 
             valid = True
@@ -65,16 +65,11 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def chat_completion(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, system_prompt: str) -> str:
+    async def chat_completion(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, system_prompt: str) -> str:
         """
         Send a message to the model and get a response.
         """
         pass
-
-    def test_system_prompt(self) -> str:
-        test_message = "Please explain the rules of the game we're about to play."
-        response, _ = self.chat_completion(test_message, [], self.model_name, self.temperature, self.max_tokens, self.system_prompt)
-        return response
 
 
 class OllamaModel(Model):
@@ -82,7 +77,7 @@ class OllamaModel(Model):
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
 
     @staticmethod
-    def chat_completion(messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, system_prompt: str) -> Tuple[str, List[Dict[str, str]]]:
+    async def chat_completion(messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, system_prompt: str) -> Tuple[str, List[Dict[str, str]]]:
         if messages and messages[0]["role"] == "system":
             messages = messages[1:]
         if system_prompt:
@@ -125,16 +120,16 @@ class AnthropicModel(Model):
             model_name = "claude-3-5-sonnet-20241022"
             print("Invalid model specified. Defaulting to claude-3-5-sonnet-20241022.")
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
-    
-    @staticmethod
-    def chat_completion(messages=[], model='claude-3-haiku-20240307', temperature=0.0, max_tokens=1024, system_prompt=""):
+        self.client = anthropic.AsyncAnthropic()
+
+    async def chat_completion(self, messages=[], model='claude-3-haiku-20240307', temperature=0.0, max_tokens=1024, system_prompt=""):
         # Check if the first message is a system message - if it is, we need to not pass it to Anthropic
         clean_messages = messages
         if messages and messages[0]["role"] == "system":
             clean_messages = messages[1:]
 
         try:
-            chat_completion = anthropic.Anthropic().messages.create(
+            chat_completion = await self.client.messages.create(
                 system=system_prompt,
                 model=model,
                 max_tokens=max_tokens,
@@ -164,16 +159,16 @@ class OpenAIModel(Model):
             model_name = "gpt-4o-mini-2024-07-18"  # Default to GPT-4o Mini
             print("Invalid model specified. Defaulting to GPT-4o Mini.")
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
-        self.client = OpenAI()
+        self.client = AsyncOpenAI()
     
-    def chat_completion(self, messages=[], model='gpt-4o-mini-2024-07-18', temperature=0.0, max_tokens=1024, system_prompt=""):
+    async def chat_completion(self, messages=[], model='gpt-4o-mini-2024-07-18', temperature=0.0, max_tokens=1024, system_prompt=""):
         if messages and messages[0]["role"] == "system":
             messages = messages[1:]
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
 
         try:
-            chat_completion = self.client.chat.completions.create(
+            chat_completion = await self.client.chat.completions.create(
                 messages=messages,
                 model=model,
                 temperature=temperature,
@@ -200,19 +195,19 @@ class OpenRouterModel(Model):
             print("Invalid model specified. Defaulting to meta-llama/llama-3.1-405b-instruct.")
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         OR_API_KEY = os.getenv('OPENROUTER_API_KEY')
-        self.client = OpenAI(
+        self.client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=OR_API_KEY
         )
     
-    def chat_completion(self, messages=[], model='meta-llama/llama-3.1-405b-instruct', temperature=0.0, max_tokens=1024, system_prompt=""):
+    async def chat_completion(self, messages=[], model='meta-llama/llama-3.1-405b-instruct', temperature=0.0, max_tokens=1024, system_prompt=""):
         if messages and messages[0]["role"] == "system":
             messages = messages[1:]
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
 
         try:
-            chat_completion = self.client.chat.completions.create(
+            chat_completion = await self.client.chat.completions.create(
                 messages=messages,
                 model=model,
                 temperature=temperature,
