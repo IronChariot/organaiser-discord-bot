@@ -174,3 +174,6 @@ diaries/
 
 # The user profile
 *_user_profile.txt
+todo.json
+reminders.json
+long_term_goals.json
