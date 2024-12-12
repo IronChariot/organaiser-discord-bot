@@ -22,7 +22,7 @@ def run_discord_bot(session, config, token):
         diary_channel = discord.utils.get(client.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
 
         if diary_channel:
-            entry = session.write_diary_entry()
+            entry = await session.write_diary_entry()
             for part in split_message(entry):
                 await diary_channel.send(part)
             sys.exit(0)
@@ -36,7 +36,7 @@ def run_discord_bot(session, config, token):
 if __name__ == '__main__':
     name = sys.argv[1]
     assistant = Assistant.load(sys.argv[1])
-    session = assistant.load_session(date.fromisoformat(sys.argv[2]))
+    session = asyncio.run(assistant.load_session(date.fromisoformat(sys.argv[2])))
 
     token = os.environ.get('DISCORD_TOKEN')
 

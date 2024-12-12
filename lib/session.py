@@ -1,5 +1,9 @@
 import json
+import pathlib
+import asyncio
 from datetime import datetime
+
+DIARIES_DIR = pathlib.Path(__file__).parent.parent.resolve() / 'diaries'
 
 # Format prompt comes from session_format_prompt.txt
 with open('session_format_prompt.txt', 'r') as f:
@@ -21,6 +25,7 @@ class Session:
         self.initial_system_prompt = system_prompt
         if self.initial_system_prompt:
             self.message_history.append({"role": "system", "content": self.initial_system_prompt})
+        self.context_lock = asyncio.Lock()
 
     def get_last_assistant_response(self):
         for message in self.message_history[::-1]:
@@ -43,7 +48,7 @@ class Session:
 
         return False
 
-    def create_summary(self):
+    async def create_summary(self):
         """Creates a summary of older messages."""
         # Keep the last self.assistant.unsummarised_messages messages unsummarised
         messages_to_summarise = self.message_history[1:-self.assistant.unsummarised_messages]  # Skip system prompt
@@ -96,7 +101,7 @@ class Session:
             summary_messages.append({"role": "assistant", "content": last_summary['content']})
         summary_messages.append({"role": "user", "content": message_log_string})
 
-        summary = self.assistant.model.query(summary_messages, system_prompt=SUMMARY_PROMPT)
+        summary = await self.assistant.model.query(summary_messages, system_prompt=SUMMARY_PROMPT)
         # print("Summary of previous messages: ", summary)
 
         # Create new message history with the summary
@@ -122,15 +127,12 @@ class Session:
                 self.messages_file.write(json.dumps(message) + '\n')
             self.messages_file.flush()
 
-    def chat(self, content):
-        # Check if we need to summarise before adding new message
-        if self.should_summarise():
-            self.create_summary()
+    async def chat(self, content):
+        "User or system sends a message.  Returns AI response (as JSON)."
 
-        # User or system sends a message.  Returns AI response (as JSON).
         self.last_activity = datetime.now()
 
-                # First, get the contents of the todo file and long term goals file
+        # First, get the contents of the todo file and long term goals file
         with open('todo.json', 'r') as fh:
             todo_json = fh.read()
         todo_dict = json.loads(todo_json)
@@ -152,16 +154,22 @@ class Session:
 
         system_prompt = self.message_history[0]["content"] + todo_string + long_term_goals_string + reminders_string + "\n\n" + FORMAT_PROMPT
 
-        self.message_history.append({"role": "user", "content": content})
+        async with self.context_lock:
+            # Check if we need to summarise before adding new message
+            if self.should_summarise():
+                await self.create_summary()
 
-        response = self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
+            self.message_history.append({"role": "user", "content": content})
 
-        self.messages_file.write(f'{json.dumps(self.message_history[-2])}\n')
-        self.messages_file.write(f'{json.dumps(self.message_history[-1])}\n')
-        self.messages_file.flush()
+            response = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
+
+            self.messages_file.write(f'{json.dumps(self.message_history[-2])}\n')
+            self.messages_file.write(f'{json.dumps(self.message_history[-1])}\n')
+            self.messages_file.flush()
+
         return response
 
-    def isolated_query(self, query, format_prompt=None, as_json=False):
+    async def isolated_query(self, query, format_prompt=None, as_json=False):
         # Runs an isolated query on this session.
         system_prompt = self.message_history[0]["content"]
 
@@ -171,14 +179,20 @@ class Session:
         print("Isolated query:", query)
 
         messages = self.message_history + [{"role": "user", "content": query}]
-        response = self.assistant.model.query(messages, system_prompt=system_prompt, as_json=as_json)
+        response = await self.assistant.model.query(messages, system_prompt=system_prompt, as_json=as_json)
 
         print("Response:", response)
         return response
 
-    def write_diary_entry(self):
-        response = self.isolated_query("SYSTEM: " + DIARY_PROMPT)
-        with open(f'diaries/{self.assistant.id}-{self.date.isoformat()}.txt', 'w') as fh:
+    @property
+    def diary_path(self):
+        return DIARIES_DIR / f'{self.assistant.id}-{self.date.isoformat()}.txt'
+
+    async def write_diary_entry(self):
+        response = await self.isolated_query("SYSTEM: " + DIARY_PROMPT)
+        path = self.diary_path
+        path.parent.mkdir(exist_ok=True)
+        with open(path, 'w') as fh:
             fh.write(response)
 
         return response

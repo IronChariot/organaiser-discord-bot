@@ -1,6 +1,7 @@
 import pathlib
 import json
 import sys
+import asyncio
 from datetime import datetime, time, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -70,6 +71,8 @@ class Assistant:
             ass.timezone = ZoneInfo(data['timezone'])
         if 'rollover' in data:
             ass.rollover = data['rollover']
+        if not ass.rollover:
+            ass.rollover = time(0, 0)
         ass.prompt_template = data['system_prompt']
         ass.discord_config = data.get('discord', {})
         ass.summarisation_threshold = data.get('summarisation_threshold')
@@ -80,9 +83,25 @@ class Assistant:
 
         return ass
 
-    def make_system_prompt(self, date):
+    async def make_system_prompt(self, date, last_session=None):
         prompt = []
-        last_session = self.find_session_before(date)
+        if last_session is None:
+            last_session = self.find_session_before(date)
+
+        # Let the AI know what day it is relative to the day it's based on
+        date_str = date.strftime('%A, %d %B %Y')
+        if last_session:
+            delta = date - last_session.date
+            if delta.days == 1:
+                preface = f"It is now {date_str} (the next day)."
+            elif delta.days > 1:
+                preface = f"It is now {date_str} ({delta.days} days later)."
+            else:
+                # Huh?
+                preface = f"It is now {date_str}."
+        else:
+            preface = f"It is now {date_str}."
+
         for component in self.prompt_template:
             heading = component.get('heading')
             if heading:
@@ -101,7 +120,7 @@ class Assistant:
             elif component['type'] == 'question':
                 question = component['question'].strip()
                 if last_session:
-                    response = last_session.isolated_query(f'SYSTEM: {question}')
+                    response = await last_session.isolated_query(f'SYSTEM: {preface} {question}')
                     prompt.append(response.strip())
 
             elif component['type'] == 'user_profile':
@@ -133,27 +152,38 @@ class Assistant:
 
         return None
 
-    def load_session(self, date):
+    def load_existing_session(self, date):
         session_path = SESSION_DIR / f'{self.id}-{date.isoformat()}.jsonl'
 
         if session_path.is_file():
             session_file = session_path.open('r+')
             session = Session(date, self)
             session.last_activity = datetime.fromtimestamp(session_path.stat().st_mtime, tz=timezone.utc)
+            session.messages_file = session_file
 
             for line in session_file:
                 line = line.strip()
                 if line:
                     session.message_history.append(json.loads(line))
+
+            return session
         else:
-            system_prompt = self.make_system_prompt(date)
-            session = Session(date, self, system_prompt)
+            return None
 
-            session_path.parent.mkdir(exist_ok=True)
+    async def load_session(self, date, last_session=None):
+        session = self.load_existing_session(date)
+        if session:
+            return session
 
-            session_file = session_path.open('w')
-            session_file.write(json.dumps({"role": "system", "content": system_prompt}) + '\n')
-            session_file.flush()
+        system_prompt = await self.make_system_prompt(date, last_session=last_session)
+        session = Session(date, self, system_prompt)
+
+        session_path = SESSION_DIR / f'{self.id}-{date.isoformat()}.jsonl'
+        session_path.parent.mkdir(exist_ok=True)
+
+        session_file = session_path.open('w')
+        session_file.write(json.dumps({"role": "system", "content": system_prompt}) + '\n')
+        session_file.flush()
 
         session.messages_file = session_file
         return session
