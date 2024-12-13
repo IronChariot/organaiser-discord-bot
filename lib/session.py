@@ -149,7 +149,7 @@ class Session:
         long_term_goals_string += "\n"
 
         # Get the reminders string:
-        reminders_string = "# Reminders:\n"
+        reminders_string = "# Currently scheduled reminders:\n"
         reminders_string += str(self.assistant.reminders)
 
         system_prompt = self.message_history[0]["content"] + todo_string + long_term_goals_string + reminders_string + "\n\n" + FORMAT_PROMPT
