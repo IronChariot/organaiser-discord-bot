@@ -239,9 +239,6 @@ class Bot(discord.Client):
             self.current_checkin_task = asyncio.create_task(self.perform_checkin(self.startup_checkin_deadline))
             self.startup_checkin_deadline = None
 
-        for reminder in self.assistant.reminders.todays_reminders():
-            asyncio.create_task(self.send_reminder(reminder))
-
     async def on_message(self, message):
         if message.author == self.user:
             return
@@ -305,3 +302,6 @@ class Bot(discord.Client):
         print(f'Date is {self.session.date}, next rollover scheduled at {rollover_time}')
         self.check_rollover.change_interval(time=rollover_time)
         self.check_rollover.start()
+
+        for reminder in self.assistant.reminders.todays_reminders():
+            asyncio.create_task(self.send_reminder(reminder))
