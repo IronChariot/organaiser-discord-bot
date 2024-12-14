@@ -3,7 +3,7 @@ import json
 from base64 import standard_b64encode
 import logging
 from abc import ABC, abstractmethod
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import anthropic
 from openai import AsyncOpenAI
 import os
@@ -168,7 +168,7 @@ class AnthropicModel(Model):
 
 
 class OpenAIModel(Model):
-    def __init__(self, model_name: str, image_model_name: str | None = None, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
+    def __init__(self, model_name: str, image_model_name: Optional[str] = None, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
         if model_name == "gpt-4o":
             model_name = "gpt-4o-2024-11-20" # $2.5/$10
         elif model_name == "gpt-4o-mini":
