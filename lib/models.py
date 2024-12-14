@@ -7,6 +7,8 @@ import anthropic
 from openai import AsyncOpenAI
 import os
 
+from .msgtypes import Role, Message, AssistantMessage
+
 
 class Model(ABC):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0, max_tokens: int = 1024, logger=None):
@@ -16,7 +18,7 @@ class Model(ABC):
         self.max_tokens = max_tokens
         self.logger = logger or logging.getLogger(__name__)
 
-    async def query(self, messages: List[Dict[str, str]], system_prompt=None, validate_func=None, as_json=False) -> str:
+    async def query(self, messages: List[Message], system_prompt=None, validate_func=None, as_json=False) -> str:
         temperature = self.temperature
         max_attempts = int((1.0 - temperature) / 0.1) + 1  # Calculate max attempts to reach t=1.0
 
@@ -26,7 +28,7 @@ class Model(ABC):
         for attempt in range(max_attempts):
             if attempt > 0:
                 self.logger.info(f"Querying model (Attempt {attempt + 1}, Temperature: {temperature})")
-            self.logger.info(f"User message: {messages[-1]['content']}")
+            self.logger.info(f"User message: {messages[-1].content}")
 
             text_response = await self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt)
             self.logger.info(f"Model response: {text_response}")
@@ -48,7 +50,7 @@ class Model(ABC):
                 valid = False
 
             if valid:
-                messages.append({"role": "assistant", "content": text_response})
+                messages.append(AssistantMessage(text_response))
                 return response
 
             temperature = min(temperature + 0.1, 1.0)
@@ -66,7 +68,7 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    async def chat_completion(self, messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, system_prompt: str) -> str:
+    async def chat_completion(self, messages: List[Message], model: str, temperature: float, max_tokens: int, system_prompt: str) -> str:
         """
         Send a message to the model and get a response.
         """
@@ -78,11 +80,10 @@ class OllamaModel(Model):
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
 
     @staticmethod
-    async def chat_completion(messages: List[Dict[str, str]], model: str, temperature: float, max_tokens: int, system_prompt: str) -> Tuple[str, List[Dict[str, str]]]:
-        if messages and messages[0]["role"] == "system":
-            messages = messages[1:]
+    async def chat_completion(messages: List[Message], model: str, temperature: float, max_tokens: int, system_prompt: str) -> Tuple[str, List[Dict[str, str]]]:
+        messages = [{"role": message.role.value, "content": message.content} for message in messages if message.role != Role.SYSTEM]
         if system_prompt:
-            messages = [{"role": "system", "content": system_prompt}] + messages
+            messages.insert(0, {"role": "system", "content": system_prompt})
 
         url = "http://localhost:11434/api/chat"
         headers = {
@@ -125,9 +126,7 @@ class AnthropicModel(Model):
 
     async def chat_completion(self, messages=[], model='claude-3-haiku-20240307', temperature=0.0, max_tokens=1024, system_prompt=""):
         # Check if the first message is a system message - if it is, we need to not pass it to Anthropic
-        clean_messages = messages
-        if messages and messages[0]["role"] == "system":
-            clean_messages = messages[1:]
+        clean_messages = [{"role": message.role.value, "content": message.content} for message in messages if message.role != Role.SYSTEM]
 
         try:
             chat_completion = await self.client.messages.create(
@@ -163,10 +162,9 @@ class OpenAIModel(Model):
         self.client = AsyncOpenAI()
 
     async def chat_completion(self, messages=[], model='gpt-4o-mini-2024-07-18', temperature=0.0, max_tokens=1024, system_prompt=""):
-        if messages and messages[0]["role"] == "system":
-            messages = messages[1:]
+        messages = [{"role": message.role.value, "content": message.content} for message in messages if message.role != Role.SYSTEM]
         if system_prompt:
-            messages = [{"role": "system", "content": system_prompt}] + messages
+            messages.insert(0, {"role": "system", "content": system_prompt})
 
         try:
             chat_completion = await self.client.chat.completions.create(
@@ -203,10 +201,9 @@ class OpenRouterModel(Model):
         )
 
     async def chat_completion(self, messages=[], model='meta-llama/llama-3.1-405b-instruct', temperature=0.0, max_tokens=1024, system_prompt=""):
-        if messages and messages[0]["role"] == "system":
-            messages = messages[1:]
+        messages = [{"role": message.role.value, "content": message.content} for message in messages if message.role != Role.SYSTEM]
         if system_prompt:
-            messages = [{"role": "system", "content": system_prompt}] + messages
+            messages.insert(0, {"role": "system", "content": system_prompt})
 
         try:
             chat_completion = await self.client.chat.completions.create(

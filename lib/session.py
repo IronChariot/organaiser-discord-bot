@@ -3,6 +3,8 @@ import pathlib
 import asyncio
 from datetime import datetime
 
+from .msgtypes import Role, Message, SystemMessage, UserMessage, AssistantMessage
+
 DIARIES_DIR = pathlib.Path(__file__).parent.parent.resolve() / 'diaries'
 
 # Format prompt comes from session_format_prompt.txt
@@ -15,6 +17,7 @@ with open('diary_prompt.txt', 'r') as f:
 with open('summary_prompt.txt', 'r') as f:
     SUMMARY_PROMPT = f.read()
 
+
 class Session:
     def __init__(self, date, assistant, system_prompt=""):
         self.date = date
@@ -24,16 +27,40 @@ class Session:
         self.assistant = assistant
         self.initial_system_prompt = system_prompt
         if self.initial_system_prompt:
-            self.message_history.append({"role": "system", "content": self.initial_system_prompt})
+            self.message_history.append(SystemMessage(self.initial_system_prompt))
         self.context_lock = asyncio.Lock()
+
+    def edit_message(self, id, content):
+        assert id is not None
+
+        for message in self.message_history:
+            if message.id == id:
+                message.content = content
+                break
+        else:
+            return
+
+        self._rewrite_message_file()
+
+    def delete_message(self, id):
+        assert id is not None
+
+        for i, message in enumerate(self.message_history):
+            if message.id == id:
+                del self.message_history[i]
+                break
+        else:
+            return
+
+        self._rewrite_message_file()
 
     def get_last_assistant_response(self):
         for message in self.message_history[::-1]:
-            if message["role"] != "assistant":
+            if message.role != Role.ASSISTANT:
                 continue
 
             try:
-                return json.loads(message["content"])
+                return message.parse_json()
             except json.JSONDecodeError:
                 continue
 
@@ -57,7 +84,7 @@ class Session:
         # Find the last summary if it exists
         last_summary = None
         for msg in messages_to_summarise[::-1]:
-            if msg['content'].startswith("Summary of previous messages:"):
+            if msg.is_summary():
                 last_summary = msg
                 break
 
@@ -75,31 +102,31 @@ class Session:
         message_log_string = ""
         for message in to_summarise:
             # Ignore system messages with no information
-            if "SYSTEM: No response within given period." in message['content']:
+            if "SYSTEM: No response within given period." in message.content:
                 continue
             # Check if the role is assistant - if so, extract the json response from the content and extract the "chat" or "react" field, if any
             message_content = ""
-            if message['role'] == "assistant":
+            if message.role == Role.ASSISTANT:
                 try:
-                    response = json.loads(message['content'])
+                    response = message.parse_json()
                     if 'chat' in response:
                         message_content = response['chat']
                     elif 'react' in response:
                         message_content = response['react']
                 except json.JSONDecodeError:
-                    message_content = message['content']
+                    message_content = message.content
             else:
-                message_content = message['content']
+                message_content = message.content
             # Ignore empty messages
             if not message_content or message_content.isspace():
                 continue
-            message_log_string += f"{message['role']}: {message_content}\n"
+            message_log_string += f"{message.role}: {message_content}\n"
 
         # Create the summary
-        summary_messages = [{"role": "system", "content": SUMMARY_PROMPT}]
+        summary_messages = [SystemMessage(SUMMARY_PROMPT)]
         if last_summary:
-            summary_messages.append({"role": "assistant", "content": last_summary['content']})
-        summary_messages.append({"role": "user", "content": message_log_string})
+            summary_messages.append(AssistantMessage(last_summary.content))
+        summary_messages.append(UserMessage(message_log_string))
 
         summary = await self.assistant.model.query(summary_messages, system_prompt=SUMMARY_PROMPT)
         # print("Summary of previous messages: ", summary)
@@ -108,10 +135,7 @@ class Session:
         new_history = [self.message_history[0]]  # Keep system prompt
         if last_summary:
             new_history.extend(messages_to_summarise[:summary_start_idx]) # Keep previous summaries
-        new_history.append({
-            "role": "assistant",
-            "content": f"Summary of previous messages: {summary}"
-        })
+        new_history.append(AssistantMessage(f"Summary of previous messages: {summary}"))
         new_history.extend(recent_messages)
 
         # Update message history and save to file
@@ -124,10 +148,10 @@ class Session:
             self.messages_file.seek(0)
             self.messages_file.truncate()
             for message in self.message_history:
-                self.messages_file.write(json.dumps(message) + '\n')
+                message.dump(self.messages_file)
             self.messages_file.flush()
 
-    async def chat(self, content):
+    async def chat(self, content, message_id=None):
         "User or system sends a message.  Returns AI response (as JSON)."
 
         self.last_activity = datetime.now()
@@ -152,33 +176,34 @@ class Session:
         reminders_string = "# Currently scheduled reminders:\n"
         reminders_string += str(self.assistant.reminders)
 
-        system_prompt = self.message_history[0]["content"] + todo_string + long_term_goals_string + reminders_string + "\n\n" + FORMAT_PROMPT
+        system_prompt = self.message_history[0].content + todo_string + long_term_goals_string + reminders_string + "\n\n" + FORMAT_PROMPT
 
         async with self.context_lock:
             # Check if we need to summarise before adding new message
             if self.should_summarise():
                 await self.create_summary()
 
-            self.message_history.append({"role": "user", "content": content})
+            message = UserMessage(content, id=message_id)
+            self.message_history.append(message)
 
             response = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
 
-            self.messages_file.write(f'{json.dumps(self.message_history[-2])}\n')
-            self.messages_file.write(f'{json.dumps(self.message_history[-1])}\n')
+            self.message_history[-2].dump(self.messages_file)
+            self.message_history[-1].dump(self.messages_file)
             self.messages_file.flush()
 
         return response
 
     async def isolated_query(self, query, format_prompt=None, as_json=False):
         # Runs an isolated query on this session.
-        system_prompt = self.message_history[0]["content"]
+        system_prompt = self.message_history[0].content
 
         if format_prompt:
             system_prompt += "\n\n" + format_prompt
 
         print("Isolated query:", query)
 
-        messages = self.message_history + [{"role": "user", "content": query}]
+        messages = self.message_history + [UserMessage(query)]
         response = await self.assistant.model.query(messages, system_prompt=system_prompt, as_json=as_json)
 
         print("Response:", response)

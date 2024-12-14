@@ -65,7 +65,8 @@ class Bot(discord.Client):
         timestamp = datetime.now(tz=self.assistant.timezone).strftime("%H:%M:%S")
         content = f'[{timestamp}] {content}'
 
-        response = await self.session.chat(content)
+        message_id = message.id if message else None
+        response = await self.session.chat(content, message_id=message_id)
         response_time = datetime.now(tz=timezone.utc)
 
         futures = []
@@ -255,6 +256,13 @@ class Bot(discord.Client):
                     reply = f'```json\n{reply}\n```'
 
                 await send_split_message(self.query_channel, reply)
+
+    async def on_raw_message_edit(self, payload):
+        if payload.data and "content" in payload.data:
+            self.session.edit_message(payload.message_id, payload.data["content"])
+
+    async def on_raw_message_delete(self, payload):
+        self.session.delete_message(payload.message_id)
 
     @tasks.loop(reconnect=True)
     async def check_rollover(self):

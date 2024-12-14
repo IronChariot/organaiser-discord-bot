@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from . import models
 from .session import Session
 from .reminders import Reminders
+from .msgtypes import parse_message
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -139,39 +140,34 @@ class Assistant:
         for i in range(limit):
             date = date - timedelta(days=1)
 
-            session_path = SESSION_DIR / f'{self.id}-{date.isoformat()}.jsonl'
-            if session_path.is_file():
-                session = Session(date, self)
-
-                for line in session_path.open('r'):
-                    line = line.strip()
-                    if line:
-                        session.message_history.append(json.loads(line))
-
+            session = self.load_existing_session(date)
+            if session is not None:
                 return session
 
         return None
 
-    def load_existing_session(self, date):
+    def load_existing_session(self, date, writable=False):
         session_path = SESSION_DIR / f'{self.id}-{date.isoformat()}.jsonl'
 
         if session_path.is_file():
-            session_file = session_path.open('r+')
+            session_file = session_path.open('r+' if writable else 'r')
             session = Session(date, self)
             session.last_activity = datetime.fromtimestamp(session_path.stat().st_mtime, tz=timezone.utc)
-            session.messages_file = session_file
+
+            if writable:
+                session.messages_file = session_file
 
             for line in session_file:
                 line = line.strip()
                 if line:
-                    session.message_history.append(json.loads(line))
+                    session.message_history.append(parse_message(line))
 
             return session
         else:
             return None
 
     async def load_session(self, date, last_session=None):
-        session = self.load_existing_session(date)
+        session = self.load_existing_session(date, writable=True)
         if session:
             return session
 
@@ -182,7 +178,7 @@ class Assistant:
         session_path.parent.mkdir(exist_ok=True)
 
         session_file = session_path.open('w')
-        session_file.write(json.dumps({"role": "system", "content": system_prompt}) + '\n')
+        session.message_history[0].dump(session_file)
         session_file.flush()
 
         session.messages_file = session_file

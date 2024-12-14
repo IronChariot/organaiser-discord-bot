@@ -10,5 +10,5 @@ if __name__ == '__main__':
         sys.exit(1)
 
     for msg in sess.message_history:
-        print('-----', msg['role'], '-----')
-        print(msg['content'])
+        print('-----', msg.role, '-----')
+        print(msg.content)
