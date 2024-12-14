@@ -30,17 +30,14 @@ class Session:
             self.message_history.append(SystemMessage(self.initial_system_prompt))
         self.context_lock = asyncio.Lock()
 
-    def edit_message(self, id, content):
+    def find_message(self, id):
         assert id is not None
 
         for message in self.message_history:
             if message.id == id:
-                message.content = content
-                break
-        else:
-            return
+                return message
 
-        self._rewrite_message_file()
+        return None
 
     def delete_message(self, id):
         assert id is not None
@@ -151,7 +148,7 @@ class Session:
                 message.dump(self.messages_file)
             self.messages_file.flush()
 
-    async def chat(self, content, message_id=None):
+    async def chat(self, content, attachments=[], message_id=None):
         "User or system sends a message.  Returns AI response (as JSON)."
 
         self.last_activity = datetime.now()
@@ -184,6 +181,7 @@ class Session:
                 await self.create_summary()
 
             message = UserMessage(content, id=message_id)
+            message.attachments[:] = attachments
             self.message_history.append(message)
 
             response = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
@@ -194,7 +192,7 @@ class Session:
 
         return response
 
-    async def isolated_query(self, query, format_prompt=None, as_json=False):
+    async def isolated_query(self, query, attachments=[], format_prompt=None, as_json=False):
         # Runs an isolated query on this session.
         system_prompt = self.message_history[0].content
 
@@ -203,7 +201,9 @@ class Session:
 
         print("Isolated query:", query)
 
-        messages = self.message_history + [UserMessage(query)]
+        message = UserMessage(query)
+        message.attachments[:] = attachments
+        messages = self.message_history + [message]
         response = await self.assistant.model.query(messages, system_prompt=system_prompt, as_json=as_json)
 
         print("Response:", response)

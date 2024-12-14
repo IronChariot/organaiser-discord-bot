@@ -1,5 +1,6 @@
 import requests
 import json
+from base64 import standard_b64encode
 import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Tuple
@@ -124,9 +125,27 @@ class AnthropicModel(Model):
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         self.client = anthropic.AsyncAnthropic()
 
+    async def encode_message(self, message):
+        encoded = {"role": message.role.value}
+        if message.attachments:
+            encoded["content"] = []
+            if message.content:
+                encoded["content"].append({"type": "text", "text": message.content})
+            for attach in message.attachments:
+                data = standard_b64encode(await attach.read())
+                source = {
+                    "type": "base64",
+                    "media_type": attach.content_type,
+                    "data": data.decode("ascii"),
+                }
+                encoded["content"].append({"type": "image", "source": source})
+        else:
+            encoded["content"] = message.content
+        return encoded
+
     async def chat_completion(self, messages=[], model='claude-3-haiku-20240307', temperature=0.0, max_tokens=1024, system_prompt=""):
         # Check if the first message is a system message - if it is, we need to not pass it to Anthropic
-        clean_messages = [{"role": message.role.value, "content": message.content} for message in messages if message.role != Role.SYSTEM]
+        clean_messages = [await self.encode_message(message) for message in messages if message.role != Role.SYSTEM]
 
         try:
             chat_completion = await self.client.messages.create(

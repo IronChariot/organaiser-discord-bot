@@ -6,6 +6,7 @@ import asyncio
 
 from .util import split_message
 from .reminders import Reminders, Reminder
+from .msgtypes import Attachment
 
 # Max chars Discord allows to be sent per message
 MESSAGE_LIMIT = 2000
@@ -65,8 +66,9 @@ class Bot(discord.Client):
         timestamp = datetime.now(tz=self.assistant.timezone).strftime("%H:%M:%S")
         content = f'[{timestamp}] {content}'
 
+        attachments = [Attachment(attach.url, attach.content_type) for attach in message.attachments] if message else []
         message_id = message.id if message else None
-        response = await self.session.chat(content, message_id=message_id)
+        response = await self.session.chat(content, attachments=attachments, message_id=message_id)
         response_time = datetime.now(tz=timezone.utc)
 
         futures = []
@@ -250,7 +252,9 @@ class Bot(discord.Client):
 
         if message.channel == self.query_channel:
             async with message.channel.typing():
-                reply = await self.session.isolated_query(message.content)
+                attachments = [Attachment(attach.url, attach.content_type) for attach in message.attachments]
+
+                reply = await self.session.isolated_query(message.content, attachments=attachments)
 
                 if reply.startswith('{'):
                     reply = f'```json\n{reply}\n```'
@@ -258,8 +262,19 @@ class Bot(discord.Client):
                 await send_split_message(self.query_channel, reply)
 
     async def on_raw_message_edit(self, payload):
-        if payload.data and "content" in payload.data:
-            self.session.edit_message(payload.message_id, payload.data["content"])
+        message = self.session.find_message(payload.message_id)
+        if not message:
+            return
+
+        if "content" in payload.data:
+            message.content = payload.data["content"]
+
+        # I think Discord only supports removing attachments?
+        if "attachments" in payload.data:
+            attach_ids = set(int(attach["id"]) for attach in payload.data["attachments"])
+            message.attachments = [attachment for attachment in message.attachments if attachment.id in attach_ids]
+
+        self.session._rewrite_message_file()
 
     async def on_raw_message_delete(self, payload):
         self.session.delete_message(payload.message_id)
