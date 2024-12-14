@@ -180,8 +180,20 @@ class OpenAIModel(Model):
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         self.client = AsyncOpenAI()
 
+    def encode_message(self, message):
+        encoded = {"role": message.role.value}
+        if message.attachments:
+            encoded["content"] = []
+            if message.content:
+                encoded["content"].append({"type": "text", "text": message.content})
+            for attach in message.attachments:
+                encoded["content"].append({"type": "image_url", "image_url": {"url": attach.url}})
+        else:
+            encoded["content"] = message.content
+        return encoded
+
     async def chat_completion(self, messages=[], model='gpt-4o-mini-2024-07-18', temperature=0.0, max_tokens=1024, system_prompt=""):
-        messages = [{"role": message.role.value, "content": message.content} for message in messages if message.role != Role.SYSTEM]
+        messages = [self.encode_message(message) for message in messages if message.role != Role.SYSTEM]
         if system_prompt:
             messages.insert(0, {"role": "system", "content": system_prompt})
 
