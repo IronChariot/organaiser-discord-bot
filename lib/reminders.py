@@ -1,7 +1,7 @@
 # Class which defines timed reminders, and makes sure they get pickled and unpickled as needed
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 import os
 
 class Reminder:
@@ -10,6 +10,17 @@ class Reminder:
         self.text = text
         self.repeat = repeat
         self.repeat_interval = repeat_interval
+
+    @property
+    def repeat_delta(self):
+        if self.repeat_interval == 'day':
+            return timedelta(days=1)
+        elif self.repeat_interval == 'week':
+            return timedelta(weeks=1)
+        elif self.repeat_interval == 'month':
+            return timedelta(months=1)
+        elif self.repeat_interval == 'year':
+            return timedelta(years=1)
 
     def __str__(self):
         if self.repeat:

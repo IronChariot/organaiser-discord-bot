@@ -267,20 +267,16 @@ class Bot(discord.Client):
         print(f'Setting reminder for {reminder.time}: {reminder.text}')
         await self.respond(f'SYSTEM: Reminder from your past self now going off: {reminder.text}')
 
+        # Remove the reminder from the list
+        self.assistant.reminders.remove_reminder(reminder.time, reminder.text)
+
         # If the reminder repeats, set up a new reminder for the next time (after 1 interval):
         if reminder.repeat:
-            if reminder.repeat_interval == 'day':
-                new_time = reminder.time + timedelta(days=1)
-            elif reminder.repeat_interval == 'week':
-                new_time = reminder.time + timedelta(weeks=1)
-            elif reminder.repeat_interval == 'month':
-                new_time = reminder.time + timedelta(months=1)
-            elif reminder.repeat_interval == 'year':
-                new_time = reminder.time + timedelta(years=1)
+            new_time = reminder.time + reminder.repeat_delta
+            while new_time < begin_time:
+                new_time += reminder.repeat_delta
+
             self.assistant.reminders.add_reminder(Reminder(new_time, reminder.text, repeat=True, repeat_interval=reminder.repeat_interval))
-        else:
-            # Remove the reminder from the list
-            self.assistant.reminders.remove_reminder(reminder.time, reminder.text)
 
     async def on_ready(self):
         print(f'{self.user} has connected to Discord!')
