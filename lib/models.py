@@ -188,14 +188,14 @@ class OpenAIModel(Model):
 
     def describe_image_parameters(self):
         if self.image_model_name == "dall-e-2":
-            return 'The image model is DALL-E 2, which requires a "prompt" string ' \
+            return 'The image model is DALL·E 2, which requires a "prompt" string ' \
                    'describing the desired ' \
                    'image in exquisite detail, a "size" string with the desired ' \
                    'size which MUST be one of "256x256", "512x512" or "1024x1024", ' \
                    '(if the user explicitly specifies a different size, choose the ' \
                    'closest size and inform them)'
         elif self.image_model_name == "dall-e-3":
-            return 'The image model is DALL-E 3, which requires a "prompt" string ' \
+            return 'The image model is DALL·E 3, which requires a "prompt" string ' \
                    'describing the desired ' \
                    'image in exquisite detail, a "size" string with the desired ' \
                    'size which MUST be one of "1024x1024", "1024x1792" or "1792x1024" ' \
