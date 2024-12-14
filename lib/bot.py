@@ -281,6 +281,9 @@ class Bot(discord.Client):
 
             self.session = await self.assistant.load_session(date, old_session)
 
+            if self.log_channel:
+                futures.append(send_split_message(self.log_channel, self.session.initial_system_prompt))
+
             if not old_session.diary_path.exists():
                 entry = await old_session.write_diary_entry()
 
