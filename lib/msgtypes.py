@@ -85,18 +85,17 @@ def parse_message(string):
     obj = json.loads(string)
     msg_id = obj.get("id")
 
-    match obj["role"]:
-        case "system":
-            msg = SystemMessage(obj["content"], id=msg_id)
+    if obj["role"] == "system":
+        msg = SystemMessage(obj["content"], id=msg_id)
 
-        case "assistant":
-            msg = AssistantMessage(obj["content"], id=msg_id)
+    elif obj["role"] == "assistant":
+        msg = AssistantMessage(obj["content"], id=msg_id)
 
-        case "user":
-            msg = UserMessage(obj["content"], id=msg_id)
+    elif obj["role"] == "user":
+        msg = UserMessage(obj["content"], id=msg_id)
 
-        case _:
-            raise RuntimeError("encountered unexpected role")
+    else:
+        raise RuntimeError("encountered unexpected role")
 
     for attach in obj.get("attachments", ()):
         msg.attachments.append(Attachment(attach["url"], attach["content_type"]))
