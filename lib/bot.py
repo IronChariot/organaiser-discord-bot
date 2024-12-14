@@ -23,12 +23,6 @@ class Bot(discord.Client):
         self.diary_channel = None
         self.query_channel = None
         self.current_checkin_task = None
-        self.startup_checkin_deadline = None
-
-        response = session.get_last_assistant_response()
-        if response and 'prompt_after' in response:
-            self.startup_checkin_deadline = session.last_activity + \
-                timedelta(minutes=response['prompt_after'])
 
         intents = discord.Intents.default()
         intents.message_content = True
@@ -150,8 +144,7 @@ class Bot(discord.Client):
             if self.current_checkin_task and not self.current_checkin_task.done():
                 self.current_checkin_task.cancel()
 
-            deadline = response_time + timedelta(minutes=response['prompt_after'])
-            self.current_checkin_task = asyncio.create_task(self.perform_checkin(deadline))
+            self.current_checkin_task = asyncio.create_task(self.perform_checkin(response_time, response['prompt_after']))
 
         # Take care of the todo list and long term goals list
         if 'todo_action' in response:
@@ -236,25 +229,30 @@ class Bot(discord.Client):
             with open('long_term_goals.json', 'w') as fh:
                 fh.write(json.dumps(long_term_goals_dict))
 
-    async def perform_checkin(self, deadline):
+    async def perform_checkin(self, last_activity, prompt_after):
         try:
-            begin_time = datetime.now(tz=timezone.utc)
-            seconds_left = 0
-            if deadline > begin_time:
-                seconds_left = (deadline - begin_time).total_seconds()
-                await asyncio.sleep(seconds_left)
+            deadline = last_activity + timedelta(minutes=prompt_after)
+            cur_time = datetime.now(tz=timezone.utc)
+            if deadline < cur_time:
+                print("Next check-in OVERDUE by", cur_time - deadline)
+            else:
+                print("Next check-in at", deadline)
+
+            while deadline > cur_time:
+                seconds_left = (deadline - cur_time).total_seconds()
+                await asyncio.sleep(min(3600, seconds_left))
+                cur_time = datetime.now(tz=timezone.utc)
 
             # Unassign this otherwise respond() will cancel us
             self.current_checkin_task = None
 
-            minutes = int(round(seconds_left / 60))
-            print(f'Checking in due to user inactivity for {minutes} minutes.')
-            if minutes == 0:
+            print(f'Checking in due to user inactivity for {prompt_after} minutes.')
+            if prompt_after == 0:
                 await self.respond(f'(Immediately thereafter…)')
-            elif minutes == 1:
+            elif prompt_after == 1:
                 await self.respond(f'(One minute later…)')
             else:
-                await self.respond(f'({minutes} minutes later…)')
+                await self.respond(f'({prompt_after} minutes later…)')
         except asyncio.CancelledError:
             print('Checkin task was cancelled')
             return
@@ -290,11 +288,6 @@ class Bot(discord.Client):
         self.log_channel = discord.utils.get(self.get_all_channels(), name=log_channel_name) if log_channel_name else None
         self.diary_channel = discord.utils.get(self.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
         self.query_channel = discord.utils.get(self.get_all_channels(), name=query_channel_name) if query_channel_name else None
-
-        if self.startup_checkin_deadline:
-            print("Next check-in at", self.startup_checkin_deadline)
-            self.current_checkin_task = asyncio.create_task(self.perform_checkin(self.startup_checkin_deadline))
-            self.startup_checkin_deadline = None
 
     async def on_message(self, message):
         if message.author == self.user:
@@ -385,3 +378,9 @@ class Bot(discord.Client):
 
         for reminder in self.assistant.reminders.todays_reminders():
             asyncio.create_task(self.send_reminder(reminder))
+
+        # Check when the next check-in should be
+        response = self.session.get_last_assistant_response()
+        if response and 'prompt_after' in response:
+            self.current_checkin_task = asyncio.create_task(
+                self.perform_checkin(self.session.last_activity, response['prompt_after']))
