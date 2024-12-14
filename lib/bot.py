@@ -84,7 +84,7 @@ class Bot(discord.Client):
                     reactions = reactions.encode('utf-16', 'surrogatepass').decode('utf-16')
                     if message:
                         for react in reactions:
-                            if not react.isspace():
+                            if not react.isspace() and react != '\u200d':
                                 futures.append(message.add_reaction(react))
                     elif 'chat' not in response:
                         futures.append(self.chat_channel.send(reactions))
