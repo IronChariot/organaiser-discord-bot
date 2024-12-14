@@ -8,7 +8,7 @@ import anthropic
 from openai import AsyncOpenAI
 import os
 
-from .msgtypes import Role, Message, AssistantMessage
+from .msgtypes import Role, Message, AssistantMessage, Attachment
 
 
 class Model(ABC):
@@ -165,7 +165,7 @@ class AnthropicModel(Model):
 
 
 class OpenAIModel(Model):
-    def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
+    def __init__(self, model_name: str, image_model_name: str | None = None, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
         if model_name == "gpt-4o":
             model_name = "gpt-4o-2024-11-20" # $2.5/$10
         elif model_name == "gpt-4o-mini":
@@ -177,6 +177,9 @@ class OpenAIModel(Model):
         else:
             model_name = "gpt-4o-mini-2024-07-18"  # Default to GPT-4o Mini
             print("Invalid model specified. Defaulting to GPT-4o Mini.")
+        if image_model_name is None:
+            image_model_name = "dall-e-2"
+        self.image_model_name = image_model_name
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         self.client = AsyncOpenAI()
 
@@ -211,6 +214,17 @@ class OpenAIModel(Model):
         except Exception as e:
             print("Error: " + str(e))
             return "Error querying the LLM: " + str(e)
+
+    async def generate_image(self, prompt: str, size: str, quality: str = "standard"):
+        response = await self.client.images.generate(
+            model=self.image_model_name,
+            prompt=prompt,
+            size=size,
+            quality=quality,
+            n=1)
+
+        print(response.data[0].url)
+        return Attachment(response.data[0].url, "image/png")
 
 
 class OpenRouterModel(Model):

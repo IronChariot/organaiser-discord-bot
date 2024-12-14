@@ -3,6 +3,8 @@ from datetime import date, datetime, time, timedelta, timezone
 import discord
 from discord.ext import tasks
 import asyncio
+from io import BytesIO
+from urllib.parse import urlparse
 
 from .util import split_message
 from .reminders import Reminders, Reminder
@@ -10,33 +12,6 @@ from .msgtypes import Attachment
 
 # Max chars Discord allows to be sent per message
 MESSAGE_LIMIT = 2000
-
-async def send_split_message(channel, message):
-    limit = MESSAGE_LIMIT
-    if len(message) > limit and '```' in message:
-        # Hard case, preserve preformatted blocks across split messages.
-        parts = list(split_message(message, limit-12))
-        blocks = 0
-        for part in parts:
-            part_blocks = part.count('```')
-
-            if blocks % 2 != 0:
-                part = '```json\n' + part
-
-            blocks += part_blocks
-
-            if blocks % 2 != 0:
-                part = part.rstrip('\n')
-                if part.endswith('```') or part.endswith('```json'):
-                    part = part.rstrip('json').rstrip('`\n')
-                else:
-                    part = part + '\n```'
-
-            await channel.send(part)
-    else:
-        # Simple case
-        for part in split_message(message, limit):
-            await channel.send(part)
 
 
 class Bot(discord.Client):
@@ -60,6 +35,69 @@ class Bot(discord.Client):
         intents.members = True
         super().__init__(intents=intents)
 
+    async def send_message(self, channel, message, file_futures=[]):
+        files = []
+        exceptions = []
+        if file_futures:
+            for i, result in enumerate(await asyncio.gather(*file_futures, return_exceptions=True)):
+                if isinstance(result, Exception):
+                    exceptions.append((i, result))
+                else:
+                    files.append(result)
+
+        limit = MESSAGE_LIMIT
+        if len(message) > limit and '```' in message:
+            # Hard case, preserve preformatted blocks across split messages.
+            parts = list(split_message(message, limit-12))
+            blocks = 0
+            send_next = ''
+            for part in parts:
+                if send_next:
+                    await channel.send(send_next)
+
+                part_blocks = part.count('```')
+
+                if blocks % 2 != 0:
+                    part = '```json\n' + part
+
+                blocks += part_blocks
+
+                if blocks % 2 != 0:
+                    part = part.rstrip('\n')
+                    if part.endswith('```') or part.endswith('```json'):
+                        part = part.rstrip('json').rstrip('`\n')
+                    else:
+                        part = part + '\n```'
+
+                send_next = part
+
+            # Last one gets sent with the files
+            if send_next or files:
+                await channel.send(send_next, files=files)
+
+        else:
+            # Simple case
+            parts = split_message(message, limit)
+            for part in parts[:-1]:
+                await channel.send(part)
+
+            await channel.send(parts[-1], files=files)
+
+        # Let the AI know about the exceptions.
+        if exceptions:
+            if len(files) == 1:
+                text = f'SYSTEM: 1 attachment successfully sent to user, but the following encountered errors:'
+            elif len(files) > 1:
+                text = f'SYSTEM: {len(files)} attachments successfully sent to user, but the following encountered errors:'
+            else:
+                text = f'SYSTEM: Sent message without attachments due to the following errors:'
+
+            for i, exception in exceptions:
+                msg = str(getattr(exception, 'message', None) or exception)
+                text += f'\nAttachment {i}: {msg}'
+
+            asyncio.create_task(self.respond(text))
+
     async def respond(self, content, message=None):
         """Respond to input from the user or the system."""
 
@@ -71,11 +109,22 @@ class Bot(discord.Client):
         response = await self.session.chat(content, attachments=attachments, message_id=message_id)
         response_time = datetime.now(tz=timezone.utc)
 
-        futures = []
+        # Any images we need to generate can be done in parallel
+        image_futures = []
+        if 'images' in response and self.assistant.image_model:
+            images = response['images']
+            if isinstance(images, dict):
+                images = [images]
 
+            for image in images:
+                image_futures.append(asyncio.create_task(self.generate_image(**image)))
+
+        futures = []
         if self.chat_channel:
             if 'chat' in response:
-                futures.append(send_split_message(self.chat_channel, response['chat']))
+                futures.append(self.send_message(self.chat_channel, response['chat'], image_futures))
+            elif image_futures:
+                futures.append(self.send_message(self.chat_channel, '', image_futures))
 
             if 'react' in response:
                 reactions = response['react']
@@ -91,7 +140,7 @@ class Bot(discord.Client):
 
         if self.log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
-            futures.append(send_split_message(self.log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```'))
+            futures.append(self.send_message(self.log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```'))
 
         if 'prompt_after' in response:
             # If there's an existing checkin task, cancel it
@@ -134,6 +183,12 @@ class Bot(discord.Client):
 
         if futures:
             await asyncio.gather(*futures)
+
+    async def generate_image(self, **kwargs):
+        img = await self.assistant.image_model.generate_image(**kwargs)
+        data = await img.read()
+        filename = urlparse(img.url).path.replace('\\', '/').rsplit('/', 1)[-1]
+        return discord.File(BytesIO(data), filename)
 
     async def update_todo(self, todo_action, todo_text_list):
         # Get the list of existing todos, if any:
@@ -259,7 +314,7 @@ class Bot(discord.Client):
                 if reply.startswith('{'):
                     reply = f'```json\n{reply}\n```'
 
-                await send_split_message(self.query_channel, reply)
+                await self.send_message(self.query_channel, reply)
 
     async def on_raw_message_edit(self, payload):
         message = self.session.find_message(payload.message_id)
@@ -305,13 +360,13 @@ class Bot(discord.Client):
             self.session = await self.assistant.load_session(date, old_session)
 
             if self.log_channel:
-                futures.append(send_split_message(self.log_channel, self.session.initial_system_prompt))
+                futures.append(self.send_message(self.log_channel, self.session.initial_system_prompt))
 
             if not old_session.diary_path.exists():
                 entry = await old_session.write_diary_entry()
 
                 if self.diary_channel:
-                    futures.append(send_split_message(self.diary_channel, entry))
+                    futures.append(self.send_message(self.diary_channel, entry))
 
             futures.append(self.change_presence(status=discord.Status.online))
 
