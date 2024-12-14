@@ -9,7 +9,7 @@ DIARIES_DIR = pathlib.Path(__file__).parent.parent.resolve() / 'diaries'
 
 # Format prompt comes from session_format_prompt.txt
 with open('session_format_prompt.txt', 'r') as f:
-    FORMAT_PROMPT = f.read()
+    FORMAT_PROMPT = f.read().strip()
 
 with open('diary_prompt.txt', 'r') as f:
     DIARY_PROMPT = f.read()
@@ -29,6 +29,12 @@ class Session:
         if self.initial_system_prompt:
             self.message_history.append(SystemMessage(self.initial_system_prompt))
         self.context_lock = asyncio.Lock()
+
+        self.standard_format_prompt = FORMAT_PROMPT
+        if assistant.image_model:
+            self.standard_format_prompt += ' ' + assistant.image_model.describe_image_parameters()
+        else:
+            self.standard_format_prompt += ' Actually, the current configuration does NOT support image generation.'
 
     def find_message(self, id):
         assert id is not None
@@ -173,7 +179,12 @@ class Session:
         reminders_string = "# Currently scheduled reminders:\n"
         reminders_string += str(self.assistant.reminders)
 
-        system_prompt = self.message_history[0].content + todo_string + long_term_goals_string + reminders_string + "\n\n" + FORMAT_PROMPT
+        system_prompt = self.message_history[0].content + \
+                        todo_string + \
+                        long_term_goals_string + \
+                        reminders_string + \
+                        "\n\n" + \
+                        self.standard_format_prompt
 
         async with self.context_lock:
             # Check if we need to summarise before adding new message
