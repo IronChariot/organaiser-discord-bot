@@ -75,13 +75,16 @@ class Bot(discord.Client):
             if send_next or files:
                 await channel.send(send_next, files=files)
 
-        else:
+        elif message.strip():
             # Simple case
             parts = split_message(message, limit)
             for part in parts[:-1]:
                 await channel.send(part)
 
             await channel.send(parts[-1], files=files)
+
+        elif files:
+            await channel.send(files=files)
 
         # Let the AI know about the exceptions.
         if exceptions:
