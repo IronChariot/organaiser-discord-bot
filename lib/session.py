@@ -1,7 +1,7 @@
 import json
 import pathlib
 import asyncio
-from datetime import datetime
+from datetime import datetime, time, timedelta
 
 from .msgtypes import Role, Message, SystemMessage, UserMessage, AssistantMessage
 
@@ -35,6 +35,15 @@ class Session:
             self.standard_format_prompt += ' ' + assistant.image_model.describe_image_parameters()
         else:
             self.standard_format_prompt += ' Actually, the current configuration does NOT support image generation.'
+
+    def get_next_rollover(self):
+        "Returns the datetime at which this session should end."
+
+        date = self.date
+        if self.assistant.rollover < time(12) or not self.assistant.rollover:
+            date += timedelta(days=1)
+
+        return datetime.combine(date, self.assistant.rollover, tzinfo=self.assistant.timezone)
 
     def find_message(self, id):
         assert id is not None

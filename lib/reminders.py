@@ -103,6 +103,5 @@ class Reminders:
         reminders_string = '\n'.join([str(reminder) for reminder in self.reminders])
         return reminders_string
 
-    def todays_reminders(self):
-        current_date_utc = datetime.now(timezone.utc).date()
-        return [reminder for reminder in self.reminders if reminder.time.date() == current_date_utc]
+    def get_reminders_before(self, time):
+        return [reminder for reminder in self.reminders if reminder.time < time]

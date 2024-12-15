@@ -166,16 +166,19 @@ class Bot(discord.Client):
             # Parse the time as a datetime:
             reminder_time = datetime.fromisoformat(response['timed_reminder_time'])
             # Make the reminder time local to UTC
+            if not reminder_time.tzinfo and self.assistant.timezone is not None:
+                reminder_time = reminder_time.replace(tzinfo=self.assistant.timezone)
             reminder_time = reminder_time.astimezone(timezone.utc)
             reminder_text = response['timed_reminder_text']
             repeat = response.get('timed_reminder_repeat', False)
             repeat_interval = response.get('timed_reminder_repeat_interval', 'day')
 
-            self.assistant.reminders.add_reminder(Reminder(reminder_time, reminder_text, repeat, repeat_interval))
+            reminder = Reminder(reminder_time, reminder_text, repeat, repeat_interval)
+            self.assistant.reminders.add_reminder(reminder)
 
             # If the reminder is for later today, set up a task to send it
-            if reminder_time.date() == date.today():
-                asyncio.create_task(self.send_reminder(Reminder(reminder_time, reminder_text, repeat, repeat_interval)))
+            if reminder_time < self.session.get_next_rollover():
+                asyncio.create_task(self.send_reminder(reminder))
 
         if futures:
             await asyncio.gather(*futures)
@@ -258,11 +261,12 @@ class Bot(discord.Client):
             return
 
     async def send_reminder(self, reminder: Reminder):
+        print(f'Setting reminder for {reminder.time}: {reminder.text}')
+
         begin_time = datetime.now(tz=timezone.utc)
         if reminder.time > begin_time:
             await asyncio.sleep((reminder.time - begin_time).total_seconds())
 
-        print(f'Setting reminder for {reminder.time}: {reminder.text}')
         await self.respond(f'SYSTEM: Reminder from your past self now going off: {reminder.text}')
 
         # Remove the reminder from the list
@@ -376,7 +380,8 @@ class Bot(discord.Client):
         self.check_rollover.change_interval(time=rollover_time)
         self.check_rollover.start()
 
-        for reminder in self.assistant.reminders.todays_reminders():
+        next_rollover = self.session.get_next_rollover()
+        for reminder in self.assistant.reminders.get_reminders_before(next_rollover):
             asyncio.create_task(self.send_reminder(reminder))
 
         # Check when the next check-in should be
