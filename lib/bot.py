@@ -411,6 +411,11 @@ class Bot(discord.Client):
 
             futures.append(self.change_presence(status=discord.Status.online))
 
+            # Schedule next day's reminders
+            next_rollover = self.session.get_next_rollover()
+            for reminder in self.assistant.reminders.get_reminders_before(next_rollover):
+                asyncio.create_task(self.send_reminder(reminder))
+
         if self.log_channel:
             futures.append(self.log_channel.send(f'Finished rollover to day {date}'))
 
