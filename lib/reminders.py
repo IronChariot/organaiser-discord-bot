@@ -49,12 +49,23 @@ class Reminders:
         self.save()
 
     def save(self):
-        # Convert the list of Reminders to a list of dictionaries
         # The time needs to be converted to a string since datetime isn't compatible with JSON
-        reminders_dict = [{'time': reminder.time.isoformat(), 'text': reminder.text, 'repeat': reminder.repeat, 'repeat_interval': reminder.repeat_interval} for reminder in self.reminders]
-        reminders_json = json.dumps(reminders_dict)
         with open('reminders.json', 'w') as f:
-            f.write(reminders_json)
+            f.write('[\n')
+            need_comma = False
+            for reminder in self.reminders:
+                if need_comma:
+                    f.write(',\n')
+                reminder_dict = {
+                    'time': reminder.time.isoformat(),
+                    'text': reminder.text,
+                    'repeat': reminder.repeat,
+                    'repeat_interval': reminder.repeat_interval,
+                }
+                json.dump(reminder_dict, f)
+                need_comma = True
+
+            f.write(']\n')
 
     def load(self):
         # Check if the file exists
