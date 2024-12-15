@@ -5,6 +5,8 @@ import datetime
 class IntervalEnum(str, Enum):
     day = 'day'
     week = 'week'
+    month = 'month'
+    year = 'year'
 
 class ResponseSchema(BaseModel):
     # Textual description of the user's current mood
