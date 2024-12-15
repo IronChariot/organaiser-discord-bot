@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 from .util import split_message
 from .reminders import Reminders, Reminder
-from .msgtypes import Attachment
+from .msgtypes import UserMessage, Attachment
 
 # Max chars Discord allows to be sent per message
 MESSAGE_LIMIT = 2000
@@ -95,13 +95,16 @@ class Bot(discord.Client):
 
             asyncio.create_task(self.respond(text))
 
-    async def respond(self, content, message=None):
+    async def respond(self, content, message=None, attachments=[]):
         """Respond to input from the user or the system."""
 
-        timestamp = datetime.now(tz=self.assistant.timezone).strftime("%H:%M:%S")
+        if message:
+            timestamp = message.created_at.astimezone(self.assistant.timezone).strftime("%H:%M:%S")
+        else:
+            timestamp = datetime.now(tz=self.assistant.timezone).strftime("%H:%M:%S")
         content = f'[{timestamp}] {content}'
 
-        attachments = [Attachment(attach.url, attach.content_type) for attach in message.attachments] if message else []
+        attachments = [Attachment(attach.url, attach.content_type) for attach in attachments]
         message_id = message.id if message else None
         response = await self.session.chat(content, attachments=attachments, message_id=message_id)
         response_time = datetime.now(tz=timezone.utc)
@@ -293,13 +296,55 @@ class Bot(discord.Client):
         self.diary_channel = discord.utils.get(self.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
         self.query_channel = discord.utils.get(self.get_all_channels(), name=query_channel_name) if query_channel_name else None
 
+        # Check if any messages came in while we were down
+        await self.check_downtime_messages()
+
+    async def check_downtime_messages(self):
+        if not self.chat_channel:
+            return
+
+        # Get the last user message with a Discord id
+        for message in self.session.message_history[::-1]:
+            if message.id:
+                last_user_msg = message
+                break
+        else:
+            return
+
+        try:
+            last_discord_msg = await self.chat_channel.fetch_message(last_user_msg.id)
+        except:
+            # May be deleted. TODO: go by timestamp or find other id?
+            return
+
+        missed_messages = []
+        async for message in self.chat_channel.history(after=last_discord_msg):
+            if message.author != self.user:
+                missed_messages.append(message)
+
+        if missed_messages:
+            timestamp = datetime.now(tz=self.assistant.timezone).strftime("%H:%M:%S")
+            self.session.append_message(UserMessage(f'[{timestamp}] SYSTEM: The following messages were sent while you were offline:'))
+
+            for message in missed_messages:
+                timestamp = message.created_at.astimezone(self.assistant.timezone).strftime("%H:%M:%S")
+                content = f'[{timestamp}] {message.author.display_name}: {message.content}'
+
+                message = UserMessage(content, id=message.id)
+                for attach in message.attachments:
+                    message.attachments.append(Attachment(attach.url, attach.content_type))
+
+                self.session.append_message(message)
+
+            await self.respond('SYSTEM: End of missed messages.')
+
     async def on_message(self, message):
         if message.author == self.user:
             return
 
         if message.channel == self.chat_channel:
             async with message.channel.typing():
-                await self.respond(f'{message.author.display_name}: {message.content}', message)
+                await self.respond(f'{message.author.display_name}: {message.content}', message, message.attachments)
 
         if message.channel == self.query_channel:
             async with message.channel.typing():

@@ -66,6 +66,13 @@ class Session:
 
         self._rewrite_message_file()
 
+    def append_message(self, message):
+        "Appends a message without invoing the model."
+
+        self.message_history.append(message)
+        message.dump(self.messages_file)
+        self.messages_file.flush()
+
     def get_last_assistant_response(self):
         for message in self.message_history[::-1]:
             if message.role != Role.ASSISTANT:
