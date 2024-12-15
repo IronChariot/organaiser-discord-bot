@@ -73,15 +73,12 @@ class Session:
         message.dump(self.messages_file)
         self.messages_file.flush()
 
-    def get_last_assistant_response(self):
+    def get_last_assistant_message(self):
         for message in self.message_history[::-1]:
             if message.role != Role.ASSISTANT:
                 continue
 
-            try:
-                return message.parse_json()
-            except json.JSONDecodeError:
-                continue
+            return message
 
         return None
 
@@ -170,7 +167,7 @@ class Session:
                 message.dump(self.messages_file)
             self.messages_file.flush()
 
-    async def chat(self, content, attachments=[], message_id=None):
+    async def chat(self, message: UserMessage):
         "User or system sends a message.  Returns AI response (as JSON)."
 
         self.last_activity = datetime.now()
@@ -207,8 +204,6 @@ class Session:
             if self.should_summarise():
                 await self.create_summary()
 
-            message = UserMessage(content, id=message_id)
-            message.attachments[:] = attachments
             self.message_history.append(message)
 
             response = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)

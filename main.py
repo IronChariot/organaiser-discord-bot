@@ -5,6 +5,8 @@ import asyncio
 
 from lib.assistant import Assistant
 from lib.bot import Bot
+from lib.msgtypes import UserMessage
+
 
 def run_local(session):
     response = session.get_last_assistant_response()
@@ -12,7 +14,7 @@ def run_local(session):
         print(response.get("chat") or response.get("react") or "(no response)")
 
     while True:
-        message = input("> ")
+        message = UserMessage(input("> "))
         response = asyncio.run(session.chat(message))
         print("\n" + (response.get("chat") or response.get("react") or "(no response)"))
 

@@ -7,6 +7,7 @@ from typing import List, Dict, Tuple, Optional
 import anthropic
 from openai import AsyncOpenAI
 import os
+from datetime import datetime, timezone
 
 from .msgtypes import Role, Message, AssistantMessage, Attachment
 
@@ -35,6 +36,7 @@ class Model(ABC):
             self.logger.info(f"User message: {messages[-1].content}")
 
             text_response = await self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt)
+            response_time = datetime.now(tz=timezone.utc)
             self.logger.info(f"Model response: {text_response}")
 
             valid = True
@@ -54,7 +56,7 @@ class Model(ABC):
                 valid = False
 
             if valid:
-                messages.append(AssistantMessage(text_response))
+                messages.append(AssistantMessage(text_response, timestamp=response_time))
                 return response
 
             temperature = min(temperature + 0.1, 1.0)

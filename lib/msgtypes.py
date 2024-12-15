@@ -1,6 +1,7 @@
 from enum import Enum
 import json
 import aiohttp
+from datetime import datetime, timezone
 
 
 http_session = None
@@ -42,13 +43,17 @@ class Attachment:
 
 
 class Message:
-    __slots__ = 'content', 'id', 'attachments'
+    __slots__ = 'content', 'id', 'attachments', 'timestamp'
 
-    def __init__(self, content: str, id=None):
+    def __init__(self, content: str, id=None, timestamp=None):
         assert hasattr(self, 'role')
         self.content = content
         self.id = id
         self.attachments = []
+        self.timestamp = timestamp
+
+    def attach(self, url, content_type):
+        self.attachments.append(Attachment(url, content_type))
 
     def parse_json(self):
         return json.loads(self.content, strict=False)
@@ -57,6 +62,8 @@ class Message:
         obj = {"role": self.role.value, "content": self.content}
         if self.id is not None:
             obj["id"] = self.id
+        if self.timestamp:
+            obj["timestamp"] = int(self.timestamp.timestamp())
         if self.attachments:
             obj["attachments"] = [{"url": attach.url, "content_type": attach.content_type} for attach in self.attachments]
 
@@ -96,6 +103,9 @@ def parse_message(string):
 
     else:
         raise RuntimeError("encountered unexpected role")
+
+    if obj.get("timestamp"):
+        msg.timestamp = datetime.fromtimestamp(obj["timestamp"], tz=timezone.utc)
 
     for attach in obj.get("attachments", ()):
         msg.attachments.append(Attachment(attach["url"], attach["content_type"]))

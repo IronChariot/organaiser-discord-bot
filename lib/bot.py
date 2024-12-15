@@ -98,15 +98,16 @@ class Bot(discord.Client):
     async def respond(self, content, message=None, attachments=[]):
         """Respond to input from the user or the system."""
 
-        if message:
-            timestamp = message.created_at.astimezone(self.assistant.timezone).strftime("%H:%M:%S")
-        else:
-            timestamp = datetime.now(tz=self.assistant.timezone).strftime("%H:%M:%S")
-        content = f'[{timestamp}] {content}'
+        timestamp = message.created_at if message else datetime.now(tz=timezone.utc)
+        timestamp_str = timestamp.astimezone(self.assistant.timezone).strftime("%H:%M:%S")
+        content = f'[{timestamp_str}] {content}'
 
-        attachments = [Attachment(attach.url, attach.content_type) for attach in attachments]
         message_id = message.id if message else None
-        response = await self.session.chat(content, attachments=attachments, message_id=message_id)
+        user_message = UserMessage(content, id=message_id, timestamp=timestamp)
+        for attach in attachments:
+            user_message.attach(attach.url, attach.content_type)
+
+        response = await self.session.chat(user_message)
         response_time = datetime.now(tz=timezone.utc)
 
         # Any images we need to generate can be done in parallel
@@ -330,9 +331,9 @@ class Bot(discord.Client):
                 timestamp = message.created_at.astimezone(self.assistant.timezone).strftime("%H:%M:%S")
                 content = f'[{timestamp}] {message.author.display_name}: {message.content}'
 
-                message = UserMessage(content, id=message.id)
+                message = UserMessage(content, id=message.id, timestamp=message.created_at)
                 for attach in message.attachments:
-                    message.attachments.append(Attachment(attach.url, attach.content_type))
+                    message.attach(attach.url, attach.content_type)
 
                 self.session.append_message(message)
 
@@ -435,7 +436,13 @@ class Bot(discord.Client):
             asyncio.create_task(self.send_reminder(reminder))
 
         # Check when the next check-in should be
-        response = self.session.get_last_assistant_response()
-        if response and 'prompt_after' in response:
-            self.current_checkin_task = asyncio.create_task(
-                self.perform_checkin(self.session.last_activity, response['prompt_after']))
+        message = self.session.get_last_assistant_message()
+        if message:
+            try:
+                response = message.parse_json()
+            except json.JSONDecodeError:
+                return
+
+            if 'prompt_after' in response:
+                self.current_checkin_task = asyncio.create_task(
+                    self.perform_checkin(message.timestamp or self.session.last_activity, response['prompt_after']))
