@@ -8,6 +8,7 @@ import anthropic
 from openai import AsyncOpenAI
 import os
 from datetime import datetime, timezone
+import asyncio
 
 from .msgtypes import Role, Message, AssistantMessage, Attachment
 
@@ -62,6 +63,7 @@ class Model(ABC):
             temperature = min(temperature + 0.1, 1.0)
             self.logger.warning(f"Response: {text_response}")
             self.logger.warning(f"Invalid response. Increasing temperature to {temperature}")
+            await asyncio.sleep(0.25)
 
         # If we've reached this point, even t=1.0 didn't work
         self.logger.error("Failed to get a valid response even at maximum temperature.")
