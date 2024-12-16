@@ -1,6 +1,7 @@
 import json
 from datetime import date, datetime, time, timedelta, timezone
 import discord
+from discord import app_commands
 from discord.ext import tasks
 import asyncio
 from io import BytesIO
@@ -29,6 +30,8 @@ class Bot(discord.Client):
         intents.message_content = True
         intents.members = True
         super().__init__(intents=intents)
+
+        self.tree = app_commands.CommandTree(self)
 
     async def send_message(self, channel, message, file_futures=[]):
         files = []
@@ -379,6 +382,8 @@ class Bot(discord.Client):
         self.diary_channel = discord.utils.get(self.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
         self.query_channel = discord.utils.get(self.get_all_channels(), name=query_channel_name) if query_channel_name else None
         self.bugs_channel = discord.utils.get(self.get_all_channels(), name=bugs_channel_name) if bugs_channel_name else None
+
+        await self.tree.sync(guild=self.chat_channel.guild)
 
         # Check if any messages came in while we were down
         await self.check_downtime_messages()
