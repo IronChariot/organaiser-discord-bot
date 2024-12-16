@@ -62,6 +62,8 @@ class Assistant:
             model = models.OpenAIModel(model_name, image_model_name)
         elif model_name.startswith('openrouter-'):
             model = models.OpenRouterModel(model_name)
+        elif model_name.startswith('gemini-'):
+            model = models.GeminiModel(model_name)
         else:
             model = models.OllamaModel(model_name)
 

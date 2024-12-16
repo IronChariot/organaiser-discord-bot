@@ -5,3 +5,4 @@ openai
 python-daemon; sys_platform != 'win32'
 pydantic
 aiohttp
+google-generativeai
