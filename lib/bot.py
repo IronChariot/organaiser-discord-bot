@@ -240,7 +240,7 @@ class Bot(discord.Client):
         reminders_text = header + self.assistant.reminders.as_markdown(self.assistant.timezone)
 
         for pin in await self.chat_channel.pins():
-            if pin.content.startswith(header):
+            if pin.content and (pin.content + '\n\n').startswith(header):
                 await pin.edit(content=reminders_text)
                 break
         else:
@@ -259,7 +259,7 @@ class Bot(discord.Client):
         header = '## Current TODOs\n'
         todos_text = header + '\n - ' + '\n - '.join(todos_list)
         for pin in await self.chat_channel.pins():
-            if pin.content.startswith(header):
+            if pin.content and (pin.content + '\n\n').startswith(header):
                 await pin.edit(content=todos_text)
                 break
         else:
