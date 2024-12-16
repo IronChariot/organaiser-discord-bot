@@ -17,8 +17,12 @@ class Reminder:
             return timedelta(days=1)
         elif self.repeat_interval == 'week':
             return timedelta(weeks=1)
+        elif self.repeat_interval == 'fortnight':
+            return timedelta(fortnight=1)
         elif self.repeat_interval == 'month':
             return timedelta(months=1)
+        elif self.repeat_interval == 'quarter':
+            return timedelta(months=3)
         elif self.repeat_interval == 'year':
             return timedelta(years=1)
 

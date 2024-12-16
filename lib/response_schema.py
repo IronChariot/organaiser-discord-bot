@@ -5,7 +5,9 @@ import datetime
 class IntervalEnum(str, Enum):
     day = 'day'
     week = 'week'
+    fortnight = 'fortnight'
     month = 'month'
+    quarter = 'quarter'
     year = 'year'
 
 class ResponseSchema(BaseModel):

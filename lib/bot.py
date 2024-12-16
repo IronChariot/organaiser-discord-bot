@@ -6,8 +6,9 @@ from discord.ext import tasks
 import asyncio
 from io import BytesIO
 from urllib.parse import urlparse
+import traceback
 
-from .util import split_message
+from .util import split_message, split_emoji
 from .reminders import Reminders, Reminder
 from .msgtypes import UserMessage, Attachment
 
@@ -134,26 +135,28 @@ class Bot(discord.Client):
 
         futures = []
         if self.chat_channel:
-            if 'chat' in response:
-                futures.append(self.send_message(self.chat_channel, response['chat'], image_futures))
+            chat = response.get('chat')
+            reactions = response.get('react')
+
+            # If there's no chat message and there's no user message to react
+            # to, the reacts become the chat message
+            if reactions and not chat and not message:
+                chat = reactions
+                reactions = None
+
+            if chat:
+                futures.append(self.send_message(self.chat_channel, chat, image_futures))
             elif image_futures:
                 futures.append(self.send_message(self.chat_channel, '', image_futures))
 
-            if 'react' in response:
-                reactions = response['react']
-                # Check if reactions is not None
-                if reactions is not None:
-                    reactions = reactions.encode('utf-16', 'surrogatepass').decode('utf-16')
-                    if message:
-                        for react in reactions:
-                            if not react.isspace() and react != '\u200d':
-                                futures.append(message.add_reaction(react))
-                    elif 'chat' not in response:
-                        futures.append(self.chat_channel.send(reactions))
+            if reactions:
+                for emoji in split_emoji(reactions):
+                    futures.append(message.add_reaction(emoji))
 
         if self.log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
-            log_future = self.send_message(self.log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```')
+            log_future = asyncio.create_task(
+                self.send_message(self.log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```'))
 
         if 'bug_report' in response and self.bugs_channel:
             # This depends on the log future since it includes a jump link to
@@ -200,7 +203,20 @@ class Bot(discord.Client):
             futures.append(self.add_timed_reminder(reminder))
 
         if futures:
-            await asyncio.gather(*futures)
+            results = await asyncio.gather(*futures, return_exceptions=True)
+
+            # Check exceptions and report them
+            exc = None
+            for result in results:
+                if isinstance(result, Exception):
+                    exc = result
+                    trace = ''.join(traceback.format_exception(exc)).rstrip()
+                    report = f'```python\n{trace}\n```'
+                    asyncio.create_task(self.write_bug_report(report, message, log_future=log_future))
+
+            # Re-raise so it shows up properly in the log
+            if exc:
+                raise exc
 
     async def write_bug_report(self, report, message=None, log_future=None):
         # Disobedience proofing
