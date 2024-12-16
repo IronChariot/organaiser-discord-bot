@@ -25,3 +25,4 @@ class ResponseSchema(BaseModel):
     timed_reminder_repeat: bool
     # Interval should be a string, specifically either 'day' or 'week'
     timed_reminder_repeat_interval: IntervalEnum
+    bug_report: str

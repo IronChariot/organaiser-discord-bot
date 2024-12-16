@@ -22,6 +22,7 @@ class Bot(discord.Client):
         self.log_channel = None
         self.diary_channel = None
         self.query_channel = None
+        self.bugs_channel = None
         self.current_checkin_task = None
 
         intents = discord.Intents.default()
@@ -47,7 +48,7 @@ class Bot(discord.Client):
             send_next = ''
             for part in parts:
                 if send_next:
-                    await channel.send(send_next)
+                    last_msg = await channel.send(send_next)
 
                 part_blocks = part.count('```')
 
@@ -67,7 +68,7 @@ class Bot(discord.Client):
 
             # Last one gets sent with the files
             if send_next or files:
-                await channel.send(send_next, files=files)
+                last_msg = await channel.send(send_next, files=files)
 
         elif message.strip():
             # Simple case
@@ -75,10 +76,10 @@ class Bot(discord.Client):
             for part in parts[:-1]:
                 await channel.send(part)
 
-            await channel.send(parts[-1], files=files)
+            last_msg = await channel.send(parts[-1], files=files)
 
         elif files:
-            await channel.send(files=files)
+            last_msg = await channel.send(files=files)
 
         # Let the AI know about the exceptions.
         if exceptions:
@@ -94,6 +95,8 @@ class Bot(discord.Client):
                 text += f'\nAttachment {i}: {msg}'
 
             asyncio.create_task(self.respond(text))
+
+        return last_msg
 
     async def respond(self, content, message=None, attachments=[]):
         """Respond to input from the user or the system."""
@@ -141,7 +144,14 @@ class Bot(discord.Client):
 
         if self.log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
-            futures.append(self.send_message(self.log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```'))
+            log_future = self.send_message(self.log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```')
+
+        if 'bug_report' in response and self.bugs_channel:
+            # This depends on the log future since it includes a jump link to
+            # the log message
+            futures.append(self.write_bug_report(response['bug_report'], message, log_future=log_future))
+        else:
+            futures.append(log_future)
 
         if 'prompt_after' in response:
             # If there's an existing checkin task, cancel it
@@ -186,6 +196,20 @@ class Bot(discord.Client):
 
         if futures:
             await asyncio.gather(*futures)
+
+    async def write_bug_report(self, report, message=None, log_future=None):
+        # Disobedience proofing
+        if not isinstance(report, str):
+            report = json.dumps(report, indent=4)
+            report = f'```json\n{report}\n```'
+
+        if log_future:
+            log_message = await log_future
+            report = f' - [Raw AI response]({log_message.jump_url})\n{report}'
+        if message:
+            report = f' - [User message]({message.jump_url})\n{report}'
+
+        await self.send_message(self.bugs_channel, report)
 
     async def generate_image(self, **kwargs):
         img = await self.assistant.image_model.generate_image(**kwargs)
@@ -292,10 +316,12 @@ class Bot(discord.Client):
         log_channel_name = config.get('log_channel')
         diary_channel_name = config.get('diary_channel')
         query_channel_name = config.get('query_channel')
+        bugs_channel_name = config.get('bugs_channel')
         self.chat_channel = discord.utils.get(self.get_all_channels(), name=chat_channel_name) if chat_channel_name else None
         self.log_channel = discord.utils.get(self.get_all_channels(), name=log_channel_name) if log_channel_name else None
         self.diary_channel = discord.utils.get(self.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
         self.query_channel = discord.utils.get(self.get_all_channels(), name=query_channel_name) if query_channel_name else None
+        self.bugs_channel = discord.utils.get(self.get_all_channels(), name=bugs_channel_name) if bugs_channel_name else None
 
         # Check if any messages came in while we were down
         await self.check_downtime_messages()

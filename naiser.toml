@@ -10,6 +10,7 @@ unsummarised_messages = 8
 chat_channel = "naiser"
 log_channel = "naiser-raw"
 diary_channel = "naiser-diaries"
+bugs_channel = "naiser-bugs"
 
 [[system_prompt]]
 type = "text"
