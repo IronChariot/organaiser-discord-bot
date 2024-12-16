@@ -45,6 +45,9 @@ class Reminders:
         if reminder not in self.reminders:
             self.reminders.append(reminder)
             self.save()
+            return True
+        else:
+            return False
 
     def get_reminders(self):
         return self.reminders
@@ -102,6 +105,30 @@ class Reminders:
         self.reminders.sort(key=lambda x: x.time)
         reminders_string = '\n'.join([str(reminder) for reminder in self.reminders])
         return reminders_string
+
+    def as_markdown(self, tz, cutoff=2000):
+        result = []
+        num_chars = 0
+        last_date = None
+        for reminder in sorted(self.reminders, key=lambda r: r.time):
+            this_date = reminder.time.astimezone(tz).date()
+            if this_date != last_date:
+                prefix = f'### {this_date.strftime("%A, %d %B")}\n'
+                last_date = this_date
+            else:
+                prefix = ''
+
+            timestamp = int(reminder.time.timestamp())
+            line = f'{prefix}- <t:{timestamp}:t> {reminder.text}'
+
+            line_len = len(line) + 1
+            if num_chars + line_len <= cutoff:
+                result.append(line)
+                num_chars += line_len
+            else:
+                break
+
+        return '\n'.join(result)
 
     def get_reminders_before(self, time):
         return [reminder for reminder in self.reminders if reminder.time < time]

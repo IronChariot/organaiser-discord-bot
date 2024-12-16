@@ -194,11 +194,7 @@ class Bot(discord.Client):
             repeat_interval = response.get('timed_reminder_repeat_interval', 'day')
 
             reminder = Reminder(reminder_time, reminder_text, repeat, repeat_interval)
-            self.assistant.reminders.add_reminder(reminder)
-
-            # If the reminder is for later today, set up a task to send it
-            if reminder_time < self.session.get_next_rollover():
-                asyncio.create_task(self.send_reminder(reminder))
+            futures.append(self.add_timed_reminder(reminder))
 
         if futures:
             await asyncio.gather(*futures)
@@ -222,6 +218,53 @@ class Bot(discord.Client):
         data = await img.read()
         filename = urlparse(img.url).path.replace('\\', '/').rsplit('/', 1)[-1]
         return discord.File(BytesIO(data), filename)
+
+    async def add_timed_reminder(self, reminder):
+        if not self.assistant.reminders.add_reminder(reminder):
+            # Already existed
+            return
+
+        # If the reminder is for later today, set up a task to send it
+        if reminder.time < self.session.get_next_rollover():
+            asyncio.create_task(self.send_reminder(reminder))
+
+        # Update the pinned reminders message
+        if self.chat_channel:
+            await self.update_reminders_message()
+
+    async def update_reminders_message(self):
+        header = '## Current Reminders\n\n'
+        reminders_text = header + self.assistant.reminders.as_markdown(self.assistant.timezone)
+
+        for pin in await self.chat_channel.pins():
+            if pin.content.startswith(header):
+                await pin.edit(content=reminders_text)
+                break
+        else:
+            msg = await self.chat_channel.send(reminders_text)
+            try:
+                await msg.pin()
+            except:
+                await self.chat_channel.send('⚠️ **Error**: pinning failed, please pin the above message manually')
+
+    async def update_todo_message(self):
+        with open('todo.json', 'r') as fh:
+            todos_json = fh.read().strip()
+
+        todos_list = json.loads(todos_json) if todos_json else []
+
+        header = '## Current TODOs\n'
+        todos_text = header + '\n - ' + '\n - '.join(todos_list)
+        for pin in await self.chat_channel.pins():
+            if pin.content.startswith(header):
+                await pin.edit(content=todos_text)
+                break
+        else:
+            msg = await self.chat_channel.send(todos_text)
+            try:
+                await msg.pin()
+            except:
+                await self.chat_channel.send('⚠️ **Error**: pinning failed, please pin the above message manually')
 
     async def update_todo(self, todo_action, todo_text_list):
         # Get the list of existing todos, if any:
@@ -252,18 +295,7 @@ class Bot(discord.Client):
 
         # Update the pinned to do message
         if self.chat_channel:
-            header = '## Current TODOs\n'
-            todos_text = header + '\n - ' + '\n - '.join(todos_list)
-            for pin in await self.chat_channel.pins():
-                if pin.content.startswith(header):
-                    await pin.edit(content=todos_text)
-                    break
-            else:
-                todo_msg = await self.chat_channel.send(todos_text)
-                try:
-                    await todo_msg.pin()
-                except:
-                    await self.chat_channel.send('⚠️ **Error**: pinning failed, please pin the above message manually')
+            await self.update_todo_message()
 
     async def update_long_term_goals(self, long_term_goal_action, long_term_goal_text_list):
         # Get the list of existing long term goals, if any:
@@ -350,6 +382,10 @@ class Bot(discord.Client):
 
         # Check if any messages came in while we were down
         await self.check_downtime_messages()
+
+        if self.chat_channel:
+            await self.update_reminders_message()
+            await self.update_todo_message()
 
     async def check_downtime_messages(self):
         if not self.chat_channel:
@@ -475,6 +511,9 @@ class Bot(discord.Client):
 
         if self.log_channel:
             futures.append(self.log_channel.send(f'Finished rollover to day {date}'))
+
+        if self.chat_channel:
+            futures.append(self.update_reminders_message())
 
         if futures:
             await asyncio.gather(*futures)
