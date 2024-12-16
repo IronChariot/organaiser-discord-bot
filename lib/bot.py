@@ -110,7 +110,13 @@ class Bot(discord.Client):
         for attach in attachments:
             user_message.attach(attach.url, attach.content_type)
 
-        response = await self.session.chat(user_message)
+        try:
+            response = await self.session.chat(user_message)
+        except ValueError as ex:
+            channel = message.channel if message else (self.chat_channel or self.log_channel)
+            await self.send_message(channel, f'⚠️ **Error**: {ex}')
+            return
+
         response_time = datetime.now(tz=timezone.utc)
 
         # Any images we need to generate can be done in parallel
@@ -377,10 +383,12 @@ class Bot(discord.Client):
             async with message.channel.typing():
                 attachments = [Attachment(attach.url, attach.content_type) for attach in message.attachments]
 
-                reply = await self.session.isolated_query(message.content, attachments=attachments)
-
-                if reply.startswith('{'):
-                    reply = f'```json\n{reply}\n```'
+                try:
+                    reply = await self.session.isolated_query(message.content, attachments=attachments)
+                    if reply.startswith('{'):
+                        reply = f'```json\n{reply}\n```'
+                except ValueError as ex:
+                    reply = f'⚠️ **Error**: {ex}'
 
                 await self.send_message(self.query_channel, reply)
 
