@@ -181,7 +181,7 @@ class Bot(discord.Client):
             long_term_goal_text_list = [long_term_goal_text] if isinstance(long_term_goal_text, str) else long_term_goal_text
             futures.append(self.update_long_term_goals(long_term_goal_action, long_term_goal_text_list))
 
-        if 'timed_reminder_time' in response:
+        if response.get('timed_reminder_time'):
             # Set up a timed reminder
             # Parse the time as a datetime:
             reminder_time = datetime.fromisoformat(response['timed_reminder_time'])
