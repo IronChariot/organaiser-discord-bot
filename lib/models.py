@@ -9,7 +9,6 @@ from openai import AsyncOpenAI
 import os
 from datetime import datetime, timezone
 import asyncio
-import google.generativeai as genai
 
 from .msgtypes import Role, Message, AssistantMessage, Attachment
 
@@ -296,6 +295,7 @@ class OpenRouterModel(Model):
 
 class GeminiModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "You are a helpful assistant.", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
+        import google.generativeai as genai
         if model_name == "gemini-2.0-flash":
             model_name = "gemini-2.0-flash-exp"
         elif model_name == "gemini-1.5-flash":
@@ -322,6 +322,7 @@ class GeminiModel(Model):
         )
 
     async def chat_completion(self, messages=[], model='gemini-2.0-flash-exp', temperature=0.0, max_tokens=1024, system_prompt=""):
+        import google.generativeai as genai
         history = [{"role": message.role.value, "parts": [message.content]} for message in messages[:-1] if message.role != Role.SYSTEM]
         if system_prompt != "" and system_prompt != None:
             # Need to recreate the model with the system prompt as the system instruction
