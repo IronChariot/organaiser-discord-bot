@@ -6,6 +6,7 @@ from discord.ext import tasks
 import asyncio
 from io import BytesIO
 from urllib.parse import urlparse
+import traceback
 
 from .util import split_message, split_emoji
 from .reminders import Reminders, Reminder
@@ -154,7 +155,8 @@ class Bot(discord.Client):
 
         if self.log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
-            log_future = self.send_message(self.log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```')
+            log_future = asyncio.create_task(
+                self.send_message(self.log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```'))
 
         if 'bug_report' in response and self.bugs_channel:
             # This depends on the log future since it includes a jump link to
@@ -201,7 +203,20 @@ class Bot(discord.Client):
             futures.append(self.add_timed_reminder(reminder))
 
         if futures:
-            await asyncio.gather(*futures)
+            results = await asyncio.gather(*futures, return_exceptions=True)
+
+            # Check exceptions and report them
+            exc = None
+            for result in results:
+                if isinstance(result, Exception):
+                    exc = result
+                    trace = ''.join(traceback.format_exception(exc)).rstrip()
+                    report = f'```python\n{trace}\n```'
+                    asyncio.create_task(self.write_bug_report(report, message, log_future=log_future))
+
+            # Re-raise so it shows up properly in the log
+            if exc:
+                raise exc
 
     async def write_bug_report(self, report, message=None, log_future=None):
         # Disobedience proofing
