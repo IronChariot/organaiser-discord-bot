@@ -352,7 +352,7 @@ class Bot(discord.Client):
 
         missed_messages = []
         async for message in self.chat_channel.history(after=last_discord_msg):
-            if message.author != self.user:
+            if message.author != self.user and (message.content or message.attachments):
                 missed_messages.append(message)
 
         if missed_messages:
@@ -373,6 +373,9 @@ class Bot(discord.Client):
 
     async def on_message(self, message):
         if message.author == self.user:
+            return
+
+        if not message.content and not message.attachments:
             return
 
         if message.channel == self.chat_channel:
