@@ -226,15 +226,15 @@ class Bot(discord.Client):
     async def update_todo(self, todo_action, todo_text_list):
         # Get the list of existing todos, if any:
         with open('todo.json', 'r') as fh:
-            todos_json = fh.read()
-        todos_list = json.loads(todos_json)
+            todos_json = fh.read().strip()
+
+        todos_list = json.loads(todos_json) if todos_json else []
 
         if todo_action == 'add':
             for todo_text in todo_text_list:
-                todos_list.append(todo_text)
-            # Write the dict back to file
-            with open('todo.json', 'w') as fh:
-                fh.write(json.dumps(todos_list))
+                if todo_text not in todos_list:
+                    todos_list.append(todo_text)
+
         elif todo_action == 'remove':
             for todo_text in todo_text_list:
                 if todo_text in todos_list:
@@ -242,9 +242,28 @@ class Bot(discord.Client):
                 # Also correctly deal with it if the bot put the whole '- ' at the front of the todo text
                 elif todo_text.startswith('- ') and todo_text[2:] in todos_list:
                     todos_list.remove(todo_text[2:])
-            # Write the dict back to file
-            with open('todo.json', 'w') as fh:
-                fh.write(json.dumps(todos_list))
+
+        else:
+            return
+
+        # Write the dict back to file
+        with open('todo.json', 'w') as fh:
+            json.dump(todos_list, fh)
+
+        # Update the pinned to do message
+        if self.chat_channel:
+            header = '## Current TODOs\n'
+            todos_text = header + '\n - ' + '\n - '.join(todos_list)
+            for pin in await self.chat_channel.pins():
+                if pin.content.startswith(header):
+                    await pin.edit(content=todos_text)
+                    break
+            else:
+                todo_msg = await self.chat_channel.send(todos_text)
+                try:
+                    await todo_msg.pin()
+                except:
+                    await self.chat_channel.send('⚠️ **Error**: pinning failed, please pin the above message manually')
 
     async def update_long_term_goals(self, long_term_goal_action, long_term_goal_text_list):
         # Get the list of existing long term goals, if any:
