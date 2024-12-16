@@ -1,3 +1,7 @@
+EMOJI_MODIFIERS = '\ufe0f\ufe0e\U0001f3fb\U0001f3fc\U0001f3fd\U0001f3fe\U0001f3ff' \
+                +  ''.join(chr(i) for i in range(0xe0020, 0xe0080))
+
+
 def split_message(msg, max_length=2000):
     if len(msg) <= max_length:
         return [msg]
@@ -34,3 +38,39 @@ def split_message(msg, max_length=2000):
             result.append(part)
 
     return result
+
+
+def split_emoji(string):
+    # Trick to get rid of surrogate pairs
+    string = string.encode('utf-16', 'surrogatepass').decode('utf-16')
+
+    i = 0
+    while i < len(string):
+        char = string[i]
+        i += 1
+
+        if char.isspace():
+            continue
+
+        # Flag consists of two characters
+        if 0x1f1e6 <= ord(char) <= 0x1f1ff:
+            if i < len(string) and 0x1f1e6 <= ord(string[i]) <= 0x1f1ff:
+                char += string[i]
+                i += 1
+
+        # Tack on variant selector, skin types and region tag
+        while i < len(string) and string[i] in EMOJI_MODIFIERS:
+            char += string[i]
+            i += 1
+
+        # Check for joiners
+        while i + 1 < len(string) and string[i] == '\u200d':
+            char += string[i:i+2]
+            i += 2
+
+            # Could be extra variant selectors?
+            while i < len(string) and string[i] in EMOJI_MODIFIERS:
+                char += string[i]
+                i += 1
+
+        yield char

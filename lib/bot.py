@@ -7,7 +7,7 @@ import asyncio
 from io import BytesIO
 from urllib.parse import urlparse
 
-from .util import split_message
+from .util import split_message, split_emoji
 from .reminders import Reminders, Reminder
 from .msgtypes import UserMessage, Attachment
 
@@ -134,22 +134,23 @@ class Bot(discord.Client):
 
         futures = []
         if self.chat_channel:
-            if 'chat' in response:
-                futures.append(self.send_message(self.chat_channel, response['chat'], image_futures))
+            chat = response.get('chat')
+            reactions = response.get('react')
+
+            # If there's no chat message and there's no user message to react
+            # to, the reacts become the chat message
+            if reactions and not chat and not message:
+                chat = reactions
+                reactions = None
+
+            if chat:
+                futures.append(self.send_message(self.chat_channel, chat, image_futures))
             elif image_futures:
                 futures.append(self.send_message(self.chat_channel, '', image_futures))
 
-            if 'react' in response:
-                reactions = response['react']
-                # Check if reactions is not None
-                if reactions is not None:
-                    reactions = reactions.encode('utf-16', 'surrogatepass').decode('utf-16')
-                    if message:
-                        for react in reactions:
-                            if not react.isspace() and react != '\u200d':
-                                futures.append(message.add_reaction(react))
-                    elif 'chat' not in response:
-                        futures.append(self.chat_channel.send(reactions))
+            if reactions:
+                for emoji in split_emoji(reactions):
+                    futures.append(message.add_reaction(emoji))
 
         if self.log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
