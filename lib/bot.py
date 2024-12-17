@@ -207,14 +207,21 @@ class Bot(discord.Client):
             futures.append(self.add_timed_reminder(reminder))
 
             timestamp = int(reminder_time.timestamp())
-            if repeat and repeat_interval == 'day':
-                actions_taken.append(f'Added reminder going off daily at <t:{timestamp}:t>')
-            elif repeat:
-                actions_taken.append(f'Added reminder for <t:{timestamp}:F> repeating every {repeat_interval}')
-            elif reminder_time.date() == date.today():
-                actions_taken.append(f'Added reminder for today at <t:{timestamp}:t>')
+            rel_date = None
+            if reminder_time.date() == date.today():
+                rel_date = 'today'
+            elif reminder_time.date() == date.today() + timedelta(days=1):
+                rel_date = 'tomorrow'
             else:
-                actions_taken.append(f'Added reminder for <t:{timestamp}:F>')
+                rel_date = f'<t:{timestamp}:R>'
+            if repeat and repeat_interval == 'day':
+                actions_taken.append(f'Added daily reminder at <t:{timestamp}:t> starting {rel_date}')
+            elif repeat:
+                actions_taken.append(f'Added {repeat_interval}ly reminder starting {rel_date}')
+            elif rel_date == 'today':
+                actions_taken.append(f'Added reminder going off <t:{timestamp}:R>')
+            else:
+                actions_taken.append(f'Added reminder going off {rel_date} at <t:{timestamp}:t>')
 
         chat = response.get('chat') or ''
         reactions = response.get('react')
