@@ -173,7 +173,7 @@ class Session:
         self.last_activity = datetime.now()
 
         # First, get the contents of the todo file and long term goals file
-        with open('todo.json', 'r') as fh:
+        with self.assistant.open_memory_file('todo.json') as fh:
             todo_json = fh.read()
         todo_dict = json.loads(todo_json)
         todo_string = "# Today's TODO:\n"
@@ -181,7 +181,7 @@ class Session:
             todo_string += f"- {todo_text}\n"
         todo_string += "\n"
 
-        with open('long_term_goals.json', 'r') as fh:
+        with self.assistant.open_memory_file('long_term_goals.json') as fh:
             long_term_goals = fh.read()
         long_term_goals_string = "# Long term goals:\n"
         for long_term_goal_text in long_term_goals:

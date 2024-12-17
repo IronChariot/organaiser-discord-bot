@@ -267,7 +267,7 @@ class Bot(discord.Client):
                 await self.chat_channel.send('⚠️ **Error**: pinning failed, please pin the above message manually')
 
     async def update_todo_message(self):
-        with open('todo.json', 'r') as fh:
+        with self.assistant.open_memory_file('todo.json', default='[]') as fh:
             todos_json = fh.read().strip()
 
         todos_list = json.loads(todos_json) if todos_json else []
@@ -287,7 +287,7 @@ class Bot(discord.Client):
 
     async def update_todo(self, todo_action, todo_text_list):
         # Get the list of existing todos, if any:
-        with open('todo.json', 'r') as fh:
+        with self.assistant.open_memory_file('todo.json', default='[]') as fh:
             todos_json = fh.read().strip()
 
         todos_list = json.loads(todos_json) if todos_json else []
@@ -309,7 +309,7 @@ class Bot(discord.Client):
             return
 
         # Write the dict back to file
-        with open('todo.json', 'w') as fh:
+        with self.assistant.open_memory_file('todo.json', 'w') as fh:
             json.dump(todos_list, fh)
 
         # Update the pinned to do message
@@ -318,23 +318,25 @@ class Bot(discord.Client):
 
     async def update_long_term_goals(self, long_term_goal_action, long_term_goal_text_list):
         # Get the list of existing long term goals, if any:
-        with open('long_term_goals.json', 'r') as fh:
+        with self.assistant.open_memory_file('long_term_goals.json', default='{}') as fh:
             long_term_goals_json = fh.read()
         long_term_goals_dict = json.loads(long_term_goals_json)
 
         if long_term_goal_action == 'add':
             for long_term_goal_text in long_term_goal_text_list:
                 long_term_goals_dict[long_term_goal_text] = True
-            # Write the dict back to file
-            with open('long_term_goals.json', 'w') as fh:
-                fh.write(json.dumps(long_term_goals_dict))
+
         elif long_term_goal_action == 'remove':
             for long_term_goal_text in long_term_goal_text_list:
                 if long_term_goal_text in long_term_goals_dict:
                     del long_term_goals_dict[long_term_goal_text]
-            # Write the dict back to file
-            with open('long_term_goals.json', 'w') as fh:
-                fh.write(json.dumps(long_term_goals_dict))
+
+        else:
+            return
+
+        # Write the dict back to file
+        with self.assistant.open_memory_file('long_term_goals.json', 'w') as fh:
+            fh.write(json.dumps(long_term_goals_dict))
 
     async def perform_checkin(self, last_activity, prompt_after):
         try:
