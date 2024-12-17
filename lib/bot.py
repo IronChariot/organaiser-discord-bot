@@ -157,25 +157,7 @@ class Bot(discord.Client):
                 image_futures.append(asyncio.create_task(self.generate_image(**image)))
 
         futures = []
-        if self.chat_channel:
-            chat = response.get('chat')
-            reactions = response.get('react')
-
-            # If there's no chat message and there's no user message to react
-            # to, the reacts become the chat message
-            if reactions and not chat and not message:
-                chat = reactions
-                reactions = None
-
-            if chat:
-                futures.append(self.send_message(self.chat_channel, chat, image_futures))
-            elif image_futures:
-                futures.append(self.send_message(self.chat_channel, '', image_futures))
-
-            if reactions:
-                for emoji in split_emoji(reactions):
-                    futures.append(message.add_reaction(emoji))
-
+        actions_taken = []
         if self.log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
             log_future = asyncio.create_task(
@@ -202,6 +184,11 @@ class Bot(discord.Client):
             # Check if todo_text is a string, or a list of strings:
             todo_text_list = [todo_text] if isinstance(todo_text, str) else todo_text
             futures.append(self.update_todo(todo_action, todo_text_list))
+            plural_s = 's' if len(todo_text_list) != 1 else ''
+            if todo_action == 'add':
+                actions_taken.append(f'Added {len(todo_text_list)} todo item{plural_s}')
+            elif todo_action == 'remove':
+                actions_taken.append(f'Removed {len(todo_text_list)} todo item{plural_s}')
 
         if 'long_term_goals_action' in response:
             long_term_goal_action = response['long_term_goals_action']
@@ -209,6 +196,7 @@ class Bot(discord.Client):
             # Check if long_term_goal_text is a string, or a list of strings:
             long_term_goal_text_list = [long_term_goal_text] if isinstance(long_term_goal_text, str) else long_term_goal_text
             futures.append(self.update_long_term_goals(long_term_goal_action, long_term_goal_text_list))
+            actions_taken.append(f'Modifying long term goals')
 
         if response.get('timed_reminder_time'):
             # Set up a timed reminder
@@ -224,6 +212,38 @@ class Bot(discord.Client):
 
             reminder = Reminder(reminder_time, reminder_text, repeat, repeat_interval)
             futures.append(self.add_timed_reminder(reminder))
+
+            timestamp = int(reminder_time.timestamp())
+            if repeat and repeat_interval == 'day':
+                actions_taken.append(f'Added reminder going off daily at <t:{timestamp}:t>')
+            elif repeat:
+                actions_taken.append(f'Added reminder for <t:{timestamp}:F> repeating every {repeat_interval}')
+            elif reminder_time.date() == date.today():
+                actions_taken.append(f'Added reminder for today at <t:{timestamp}:t>')
+            else:
+                actions_taken.append(f'Added reminder for <t:{timestamp}:F>')
+
+        chat = response.get('chat') or ''
+        reactions = response.get('react')
+
+        if self.chat_channel:
+            # If there's no chat message and there's no user message to react
+            # to OR we want to report on actions taken, the reacts become the
+            # chat message
+            if reactions and not chat and (not message or actions_taken):
+                chat = reactions
+                reactions = None
+
+            if chat or image_futures:
+                # Add a log of actions taken in small text
+                if actions_taken:
+                    chat = '\n-# '.join([chat] + actions_taken)
+
+                futures.insert(0, self.send_message(self.chat_channel, chat, image_futures))
+
+        if message and reactions:
+            for emoji in split_emoji(reactions):
+                futures.insert(0, message.add_reaction(emoji))
 
         if futures:
             results = await asyncio.gather(*futures, return_exceptions=True)
