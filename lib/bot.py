@@ -11,24 +11,10 @@ import traceback
 from .util import split_message, split_emoji, format_json_md
 from .reminders import Reminders, Reminder
 from .msgtypes import UserMessage, Attachment
+from . import views
 
 # Max chars Discord allows to be sent per message
 MESSAGE_LIMIT = 2000
-
-
-class Retry(discord.ui.View):
-    def __init__(self):
-        super().__init__()
-        self.retry = False
-
-    @discord.ui.button(label='Retry', style=discord.ButtonStyle.primary)
-    async def btn_retry(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.retry = True
-        self.stop()
-
-    @discord.ui.button(label='Close', style=discord.ButtonStyle.secondary)
-    async def btn_close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.stop()
 
 
 class Bot(discord.Client):
@@ -40,6 +26,10 @@ class Bot(discord.Client):
         self.diary_channel = None
         self.query_channel = None
         self.bugs_channel = None
+        self.todo_list_message = None
+        self.todo_list_view = None
+        self.reminder_list_message = None
+        self.reminder_list_view = None
         self.current_checkin_task = None
 
         intents = discord.Intents.default()
@@ -136,11 +126,14 @@ class Bot(discord.Client):
                 retry = False
             except ValueError as ex:
                 channel = message.channel if message else (self.chat_channel or self.log_channel)
-                view = Retry()
+                view = views.RetryButton()
                 err_msg = await channel.send(f'⚠️ **Error**: {ex}', view=view)
                 await view.wait()
                 retry = view.retry
-                await err_msg.delete()
+                try:
+                    await err_msg.delete()
+                except:
+                    pass
                 if not retry:
                     return
 
@@ -296,21 +289,19 @@ class Bot(discord.Client):
             await self.update_reminders_message()
 
     async def update_reminders_message(self):
+        if not self.reminder_list_message:
+            return
+
         header = '## Current Reminders\n\n'
         reminders_text = header + self.assistant.reminders.as_markdown(self.assistant.timezone)
 
-        for pin in await self.chat_channel.pins():
-            if pin.content and (pin.content + '\n\n').startswith(header):
-                await pin.edit(content=reminders_text)
-                break
-        else:
-            msg = await self.chat_channel.send(reminders_text)
-            try:
-                await msg.pin()
-            except:
-                await self.chat_channel.send('⚠️ **Error**: pinning failed, please pin the above message manually')
+        view = self.reminder_list_view
+        await self.reminder_list_message.edit(content=reminders_text, view=view)
 
     async def update_todo_message(self):
+        if not self.todo_list_message:
+            return
+
         with self.assistant.open_memory_file('todo.json', default='[]') as fh:
             todos_json = fh.read().strip()
 
@@ -318,16 +309,9 @@ class Bot(discord.Client):
 
         header = '## Current TODOs\n'
         todos_text = header + '\n - ' + '\n - '.join(todos_list)
-        for pin in await self.chat_channel.pins():
-            if pin.content and (pin.content + '\n\n').startswith(header):
-                await pin.edit(content=todos_text)
-                break
-        else:
-            msg = await self.chat_channel.send(todos_text)
-            try:
-                await msg.pin()
-            except:
-                await self.chat_channel.send('⚠️ **Error**: pinning failed, please pin the above message manually')
+
+        view = self.todo_list_view
+        await self.todo_list_message.edit(content=todos_text, view=view)
 
     async def update_todo(self, todo_action, todo_text_list):
         # Get the list of existing todos, if any:
@@ -445,14 +429,41 @@ class Bot(discord.Client):
         self.query_channel = discord.utils.get(self.get_all_channels(), name=query_channel_name) if query_channel_name else None
         self.bugs_channel = discord.utils.get(self.get_all_channels(), name=bugs_channel_name) if bugs_channel_name else None
 
-        await self.tree.sync(guild=self.chat_channel.guild)
+        # Do this in the background, it takes a long time
+        sync_task = asyncio.create_task(self.tree.sync(guild=self.chat_channel.guild))
+
+        if self.chat_channel:
+            for pin in await self.chat_channel.pins():
+                if not pin.content:
+                    continue
+
+                content = pin.content + '\n'
+                if content.startswith('## Current TODOs\n'):
+                    self.todo_list_message = pin
+                elif content.startswith('## Current Reminders\n'):
+                    self.reminder_list_message = pin
+
+            if not self.todo_list_message:
+                self.todo_list_message = await self.chat_channel.send('## Current TODOs', view=self.todo_list_view)
+            if not self.reminder_list_message:
+                self.reminder_list_message = await self.chat_channel.send('## Current Reminders', view=self.reminder_list_view)
+
+            try:
+                if not self.todo_list_message.pinned:
+                    await self.todo_list_message.pin()
+                if not self.reminder_list_message.pinned:
+                    await self.reminder_list_message.pin()
+            except:
+                close_btn = views.CloseButton()
+                close_btn.message = await self.chat_channel.send('### ⚠️ **Error**\nPinning failed, please pin the above message(s) manually.', view=close_btn, delete_after=180)
+
+            await self.update_reminders_message()
+            await self.update_todo_message()
 
         # Check if any messages came in while we were down
         await self.check_downtime_messages()
 
-        if self.chat_channel:
-            await self.update_reminders_message()
-            await self.update_todo_message()
+        await sync_task
 
     async def check_downtime_messages(self):
         if not self.chat_channel:
@@ -596,6 +607,11 @@ class Bot(discord.Client):
         next_rollover = self.session.get_next_rollover()
         for reminder in self.assistant.reminders.get_reminders_before(next_rollover):
             asyncio.create_task(self.send_reminder(reminder))
+
+        self.reminder_list_view = views.ReminderListView(self)
+        self.todo_list_view = views.TodoListView(self)
+        self.add_view(self.reminder_list_view)
+        self.add_view(self.todo_list_view)
 
         # Check when the next check-in should be
         message = self.session.get_last_assistant_message()

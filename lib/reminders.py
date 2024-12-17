@@ -103,6 +103,10 @@ class Reminders:
             self.save()
         return reminders
 
+    def reload(self):
+        assert self.filename is not None
+        self.load(open(self.filename, 'r'))
+
     def __str__(self):
         # Order the reminders by time, starting with the next one
         self.reminders.sort(key=lambda x: x.time)
