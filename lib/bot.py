@@ -16,6 +16,21 @@ from .msgtypes import UserMessage, Attachment
 MESSAGE_LIMIT = 2000
 
 
+class Retry(discord.ui.View):
+    def __init__(self):
+        super().__init__()
+        self.retry = False
+
+    @discord.ui.button(label='Retry', style=discord.ButtonStyle.primary)
+    async def btn_retry(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.retry = True
+        self.stop()
+
+    @discord.ui.button(label='Close', style=discord.ButtonStyle.secondary)
+    async def btn_close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.stop()
+
+
 class Bot(discord.Client):
     def __init__(self, session):
         self.session = session
@@ -114,12 +129,20 @@ class Bot(discord.Client):
         for attach in attachments:
             user_message.attach(attach.url, attach.content_type)
 
-        try:
-            response = await self.session.chat(user_message)
-        except ValueError as ex:
-            channel = message.channel if message else (self.chat_channel or self.log_channel)
-            await self.send_message(channel, f'⚠️ **Error**: {ex}')
-            return
+        retry = True
+        while retry:
+            try:
+                response = await self.session.chat(user_message)
+                retry = False
+            except ValueError as ex:
+                channel = message.channel if message else (self.chat_channel or self.log_channel)
+                view = Retry()
+                err_msg = await channel.send(f'⚠️ **Error**: {ex}', view=view)
+                await view.wait()
+                retry = view.retry
+                await err_msg.delete()
+                if not retry:
+                    return
 
         response_time = datetime.now(tz=timezone.utc)
 
