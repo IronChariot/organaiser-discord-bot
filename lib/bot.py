@@ -8,7 +8,7 @@ from io import BytesIO
 from urllib.parse import urlparse
 import traceback
 
-from .util import split_message, split_emoji
+from .util import split_message, split_emoji, format_json_md
 from .reminders import Reminders, Reminder
 from .msgtypes import UserMessage, Attachment
 
@@ -179,7 +179,7 @@ class Bot(discord.Client):
         if self.log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
             log_future = asyncio.create_task(
-                self.send_message(self.log_channel, f'> {quoted_message}\n\n```json\n{json.dumps(response, indent=4)}\n```'))
+                self.send_message(self.log_channel, f'> {quoted_message}\n\n{format_json_md(response)}'))
 
         if 'bug_report' in response and self.bugs_channel:
             # This depends on the log future since it includes a jump link to
@@ -234,6 +234,8 @@ class Bot(discord.Client):
                 if isinstance(result, Exception):
                     exc = result
                     trace = ''.join(traceback.format_exception(exc)).rstrip()
+                    # Hack to insert zero-width spaces
+                    trace = trace.replace('```', '`​`​`')
                     report = f'```python\n{trace}\n```'
                     asyncio.create_task(self.write_bug_report(report, message, log_future=log_future))
 
@@ -244,8 +246,7 @@ class Bot(discord.Client):
     async def write_bug_report(self, report, message=None, log_future=None):
         # Disobedience proofing
         if not isinstance(report, str):
-            report = json.dumps(report, indent=4)
-            report = f'```json\n{report}\n```'
+            report = format_json_md(report)
 
         if log_future:
             log_message = await log_future

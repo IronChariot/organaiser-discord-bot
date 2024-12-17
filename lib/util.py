@@ -1,3 +1,5 @@
+import json
+
 EMOJI_MODIFIERS = '\ufe0f\ufe0e\U0001f3fb\U0001f3fc\U0001f3fd\U0001f3fe\U0001f3ff' \
                 +  ''.join(chr(i) for i in range(0xe0020, 0xe0080))
 
@@ -74,3 +76,8 @@ def split_emoji(string):
                 i += 1
 
         yield char
+
+
+def format_json_md(data):
+    code = json.dumps(data, indent=4).replace('```', '\\u0060\\u0060\\u0060')
+    return f'```json\n{code}\n```'
