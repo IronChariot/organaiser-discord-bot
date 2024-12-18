@@ -85,8 +85,14 @@ class Session:
     def should_summarise(self):
         """Determines if the message history needs summarisation."""
         # Check if we have more than self.assistant.summarisation_threshold messages
+        # Count how many messages there are since the last summarisation (which started with "~~~")
+        messages_since_last_summary = 0
+        for message in self.message_history[::-1]:
+            if message.is_summary():
+                break
+            messages_since_last_summary += 1
         if self.assistant.summarisation_threshold is not None and \
-           len(self.message_history) > self.assistant.summarisation_threshold:
+           messages_since_last_summary > self.assistant.summarisation_threshold:
             return True
 
         return False
@@ -118,7 +124,7 @@ class Session:
         message_log_string = ""
         for message in to_summarise:
             # Ignore system messages with no information
-            if "SYSTEM: No response within given period." in message.content:
+            if "minutes later\u2026)" in message.content or "SYSTEM:" in message.content:
                 continue
             # Check if the role is assistant - if so, extract the json response from the content and extract the "chat" or "react" field, if any
             message_content = ""
@@ -145,13 +151,14 @@ class Session:
         summary_messages.append(UserMessage(message_log_string))
 
         summary = await self.assistant.model.query(summary_messages, system_prompt=SUMMARY_PROMPT)
+        # print("Sent to model to summarise: \n", summary_messages)
         # print("Summary of previous messages: ", summary)
 
         # Create new message history with the summary
         new_history = [self.message_history[0]]  # Keep system prompt
         if last_summary:
             new_history.extend(messages_to_summarise[:summary_start_idx]) # Keep previous summaries
-        new_history.append(AssistantMessage(f"Summary of previous messages: {summary}"))
+        new_history.append(AssistantMessage(f"~~~ {summary}"))
         new_history.extend(recent_messages)
 
         # Update message history and save to file

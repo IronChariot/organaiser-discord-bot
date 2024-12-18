@@ -71,13 +71,19 @@ class Message:
 
     def is_summary(self):
         return False
+    
+    def __str__(self):
+        return f'{self.role.value}: {self.content}'
+    
+    def __repr__(self):
+        return str(self)
 
 
 class AssistantMessage(Message):
     role = Role.ASSISTANT
 
     def is_summary(self):
-        return self.content.startswith("Summary of previous messages:")
+        return self.content.startswith("~~~")
 
 
 class SystemMessage(Message):
