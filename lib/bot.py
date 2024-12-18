@@ -175,7 +175,7 @@ class Bot(discord.Client):
             # This depends on the log future since it includes a jump link to
             # the log message
             futures.append(self.write_bug_report(response['bug_report'], message, log_future=log_future))
-        else:
+        elif self.log_channel:
             futures.append(log_future)
 
         if 'prompt_after' in response:
