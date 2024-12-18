@@ -12,6 +12,14 @@ class Role(Enum):
     ASSISTANT = 'assistant'
 
 
+class Channel(Enum):
+    CHAT = 'chat'
+    LOG = 'log'
+    DIARY = 'diary'
+    QUERY = 'query'
+    BUGS = 'bugs'
+
+
 class Attachment:
     def __init__(self, url, content_type, id=None):
         self.content_type = content_type

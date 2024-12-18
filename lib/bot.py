@@ -7,10 +7,12 @@ import asyncio
 from io import BytesIO
 from urllib.parse import urlparse
 import traceback
+from collections import defaultdict
 
 from .util import split_message, split_emoji, format_json_md
 from .reminders import Reminders, Reminder
-from .msgtypes import UserMessage, Attachment
+from .msgtypes import UserMessage, Attachment, Channel
+from .plugin import Plugin
 from . import views
 
 # Max chars Discord allows to be sent per message
@@ -53,6 +55,28 @@ class Bot(discord.Client):
         super().__init__(intents=intents)
 
         self.tree = app_commands.CommandTree(self)
+
+        self.plugins = {}
+        self.__hooks = defaultdict(list)
+        for plugin, config in self.assistant.plugin_config.items():
+            if config.get('enabled'):
+                self.load_plugin(plugin, config)
+
+        for plugin in self.plugins.values():
+            plugin.register_discord_commands(self)
+
+    def get_channel(self, channel):
+        #TODO better system for channels
+        if channel == Channel.CHAT:
+            return self.chat_channel
+        elif channel == Channel.LOG:
+            return self.log_channel
+        elif channel == Channel.DIARY:
+            return self.diary_channel
+        elif channel == Channel.QUERY:
+            return self.query_channel
+        elif channel == Channel.BUGS:
+            return self.bugs_channel
 
     async def send_message(self, channel, message, file_futures=[]):
         files = []
@@ -445,14 +469,19 @@ class Bot(discord.Client):
         diary_channel_name = config.get('diary_channel')
         query_channel_name = config.get('query_channel')
         bugs_channel_name = config.get('bugs_channel')
-        self.chat_channel = discord.utils.get(self.get_all_channels(), name=chat_channel_name) if chat_channel_name else None
-        self.log_channel = discord.utils.get(self.get_all_channels(), name=log_channel_name) if log_channel_name else None
-        self.diary_channel = discord.utils.get(self.get_all_channels(), name=diary_channel_name) if diary_channel_name else None
-        self.query_channel = discord.utils.get(self.get_all_channels(), name=query_channel_name) if query_channel_name else None
-        self.bugs_channel = discord.utils.get(self.get_all_channels(), name=bugs_channel_name) if bugs_channel_name else None
+
+        all_channels = list(self.get_all_channels())
+        self.chat_channel = discord.utils.get(all_channels, name=chat_channel_name) if chat_channel_name else None
+        self.log_channel = discord.utils.get(all_channels, name=log_channel_name) if log_channel_name else None
+        self.diary_channel = discord.utils.get(all_channels, name=diary_channel_name) if diary_channel_name else None
+        self.query_channel = discord.utils.get(all_channels, name=query_channel_name) if query_channel_name else None
+        self.bugs_channel = discord.utils.get(all_channels, name=bugs_channel_name) if bugs_channel_name else None
 
         # Do this in the background, it takes a long time
-        sync_task = asyncio.create_task(self.tree.sync(guild=self.chat_channel.guild))
+        if self.chat_channel:
+            guild = self.chat_channel.guild
+            self.tree.copy_global_to(guild=guild)
+            sync_task = asyncio.create_task(self.tree.sync(guild=guild))
 
         if self.chat_channel:
             for pin in await self.chat_channel.pins():
@@ -596,12 +625,7 @@ class Bot(discord.Client):
             if self.log_channel:
                 futures.append(self.send_message(self.log_channel, self.session.initial_system_prompt))
 
-            if not old_session.diary_path.exists():
-                entry = await old_session.write_diary_entry()
-
-                if self.diary_channel:
-                    futures.append(self.send_message(self.diary_channel, entry))
-
+            futures += self.call_hooks('post_session_end', old_session)
             futures.append(self.change_presence(status=discord.Status.online))
 
             # Schedule next day's reminders
@@ -646,3 +670,13 @@ class Bot(discord.Client):
             if 'prompt_after' in response:
                 self.current_checkin_task = asyncio.create_task(
                     self.perform_checkin(message.timestamp or self.session.last_activity, response['prompt_after']))
+
+    def load_plugin(self, name, config):
+        plugin = Plugin.load(name, self, config)
+        self.plugins[name] = plugin
+        for name, hook in plugin.hooks:
+            self.__hooks[name].append(hook)
+
+    def call_hooks(self, name, *args, **kwargs):
+        for hook in self.__hooks[name]:
+            yield hook(*args, **kwargs)

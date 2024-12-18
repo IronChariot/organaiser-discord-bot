@@ -22,18 +22,6 @@ def run_local(session):
 
 def run_discord_bot(assistant, session, token):
     bot = Bot(session)
-
-    @bot.tree.command(name="diary_entry_write",
-                      description="Write out today's diary entry immediately.")
-    async def diary_entry_write(interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        entry = await session.write_diary_entry()
-        if bot.diary_channel:
-            await bot.send_message(bot.diary_channel, entry)
-
-        await interaction.followup.send(f'Wrote diary entry for {session.date}.', ephemeral=True)
-
     bot.run(token)
 
 

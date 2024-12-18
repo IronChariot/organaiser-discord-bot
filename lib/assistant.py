@@ -33,6 +33,7 @@ class Assistant:
         self.timezone = None
         self.rollover = None
         self.reminders = Reminders()
+        self.plugin_config = {}
 
     def get_today(self):
         "Returns the current date, respecting the configured rollover."
@@ -96,6 +97,7 @@ class Assistant:
         # Load reminders from file
         ass.reminders.load(ass.open_memory_file('reminders.json', default='[]'))
 
+        ass.plugin_config = data.get('plugins', {})
         return ass
 
     def open_memory_file(self, suffix, mode='r', default=''):

@@ -5,14 +5,9 @@ from datetime import datetime, time, timedelta
 
 from .msgtypes import Role, Message, SystemMessage, UserMessage, AssistantMessage
 
-DIARIES_DIR = pathlib.Path(__file__).parent.parent.resolve() / 'diaries'
-
 # Format prompt comes from session_format_prompt.txt
 with open('session_format_prompt.txt', 'r') as f:
     FORMAT_PROMPT = f.read().strip()
-
-with open('diary_prompt.txt', 'r') as f:
-    DIARY_PROMPT = f.read()
 
 with open('summary_prompt.txt', 'r') as f:
     SUMMARY_PROMPT = f.read()
@@ -236,17 +231,4 @@ class Session:
         response = await self.assistant.model.query(messages, system_prompt=system_prompt, as_json=as_json)
 
         print("Response:", response)
-        return response
-
-    @property
-    def diary_path(self):
-        return DIARIES_DIR / f'{self.assistant.id}-{self.date.isoformat()}.txt'
-
-    async def write_diary_entry(self):
-        response = await self.isolated_query("SYSTEM: " + DIARY_PROMPT)
-        path = self.diary_path
-        path.parent.mkdir(exist_ok=True)
-        with open(path, 'w') as fh:
-            fh.write(response)
-
         return response
