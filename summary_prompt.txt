@@ -5,3 +5,5 @@ Please create a concise summary of the following conversation, focusing on:
 - Significant topics discussed
 - Any set reminders or patterns
 Keep only the most relevant information for maintaining conversation context. If any of the above do not apply, do not mention them.
+At the beginning of this set of messages, there may be a summary message (starting with '~~~'). Do not include the information in that message in your summary.
+Instead, just use it as extra context for the messages to be summarised.
