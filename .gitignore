@@ -169,8 +169,10 @@ userids.json
 *.pid
 *.pickle
 
-# Anything in the diaries directory
+# Data directories
+sessions/
 diaries/
+memory/
 
 # The user profile
 *_user_profile.txt

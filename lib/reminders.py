@@ -44,6 +44,7 @@ class Reminder:
 class Reminders:
     def __init__(self):
         self.reminders = []
+        self.filename = None
     
     def add_reminder(self, reminder):
         if reminder not in self.reminders:
@@ -64,8 +65,10 @@ class Reminders:
         self.save()
 
     def save(self):
+        assert self.filename is not None
+
         # The time needs to be converted to a string since datetime isn't compatible with JSON
-        with open('reminders.json', 'w') as f:
+        with open(self.filename, 'w') as f:
             f.write('[\n')
             need_comma = False
             for reminder in self.reminders:
@@ -82,15 +85,10 @@ class Reminders:
 
             f.write(']\n')
 
-    def load(self):
-        # Check if the file exists
-        if not os.path.isfile('reminders.json'):
-            # Create the file
-            self.save()
-
+    def load(self, file):
         reminders = []
         num_dupes = 0
-        with open('reminders.json', 'r') as f:
+        with file as f:
             for reminder_dict in json.load(f):
                 reminder = Reminder(datetime.fromisoformat(reminder_dict['time']), reminder_dict['text'], reminder_dict['repeat'], reminder_dict['repeat_interval'])
                 if reminder not in reminders:
@@ -98,11 +96,16 @@ class Reminders:
                 else:
                     num_dupes += 1
 
+        self.filename = file.name
         self.reminders = reminders
         if num_dupes > 0:
             print(f'Removed {num_dupes} duplicate reminders')
             self.save()
         return reminders
+
+    def reload(self):
+        assert self.filename is not None
+        self.load(open(self.filename, 'r'))
 
     def __str__(self):
         # Order the reminders by time, starting with the next one

@@ -16,6 +16,7 @@ else:
     from pip._vendor import tomli
 
 SESSION_DIR = pathlib.Path(__file__).parent.parent.resolve() / 'sessions'
+MEMORY_DIR = pathlib.Path(__file__).parent.parent.resolve() / 'memory'
 
 
 class Assistant:
@@ -93,9 +94,24 @@ class Assistant:
         ass.unsummarised_messages = data.get('unsummarised_messages', 1000)
 
         # Load reminders from file
-        ass.reminders.load()
+        ass.reminders.load(ass.open_memory_file('reminders.json', default='[]'))
 
         return ass
+
+    def open_memory_file(self, suffix, mode='r', default=''):
+        path = MEMORY_DIR / f'{self.id}-{suffix}'
+        if not path.exists():
+            MEMORY_DIR.mkdir(exist_ok=True)
+
+            # Backward compatibility
+            with open(path, 'w') as fout:
+                if os.path.isfile(suffix):
+                    with open(suffix, 'r') as fin:
+                        fout.write(fin.read())
+                else:
+                    fout.write(default)
+
+        return path.open(mode)
 
     async def make_system_prompt(self, date, last_session=None):
         prompt = []
