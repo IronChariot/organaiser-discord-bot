@@ -117,8 +117,9 @@ class Reminders:
             time = reminder.time
             if tz is not None:
                 time = time.astimezone(tz)
+            formatted_time = time.strftime('%Y-%m-%d %H:%M')
 
-            text = f'{time.strftime('%Y-%m-%d %H:%M')}: {reminder.text}'
+            text = f'{formatted_time}: {reminder.text}'
             if reminder.repeat:
                 text += f' (repeats every {reminder.repeat_interval})'
             result.append(text)
