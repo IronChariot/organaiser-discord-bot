@@ -204,7 +204,12 @@ class Session:
 
             self.message_history.append(message)
 
-            response = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
+            try:
+                response = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
+            except:
+                if self.message_history[-1] == message:
+                    self.message_history.pop()
+                raise
 
             self.message_history[-2].dump(self.messages_file)
             self.message_history[-1].dump(self.messages_file)
