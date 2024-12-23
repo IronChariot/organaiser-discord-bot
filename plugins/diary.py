@@ -18,8 +18,10 @@ class DiaryPlugin(Plugin):
         self.prompt = config.get('prompt', DEFAULT_PROMPT)
 
     async def on_post_session_end(self, session):
-        entry = await self._write_diary_entry(session)
-        await self.send_message(entry, channel=Channel.DIARY)
+        path = self._get_entry_path(session)
+        if not path.exists():
+            entry = await self._write_diary_entry(session)
+            await self.send_message(entry, channel=Channel.DIARY)
 
     def _get_entry_path(self, session):
         return DIARIES_DIR / f'{self.assistant.id}-{session.date.isoformat()}.txt'
