@@ -1,4 +1,4 @@
-from lib.plugin import Plugin, hook
+from lib.plugin import Plugin, hook, discord_command
 from lib.msgtypes import Channel
 
 import discord
@@ -38,14 +38,14 @@ class DiaryPlugin(Plugin):
 
         return response
 
-    def register_discord_commands(self, bot):
-        @bot.tree.command(name="diary_entry_write",
-                          description="Write out today's diary entry immediately.")
-        async def diary_entry_write(interaction: discord.Interaction):
-            await interaction.response.defer(ephemeral=True, thinking=True)
+    @discord_command(name="diary_entry_write",
+                     description="Write out today's diary entry immediately.")
+    async def on_discord_command(self, bot, interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
-            session = bot.session
-            entry = await self._write_diary_entry(session)
-            await self.send_message(entry, channel=Channel.DIARY)
+        session = bot.session
+        entry = await self._write_diary_entry(session)
+        print(self, entry, self.send_message)
+        await self.send_message(entry, channel=Channel.DIARY)
 
-            await interaction.followup.send(f'Wrote diary entry for {session.date}.', ephemeral=True)
+        await interaction.followup.send(f'Wrote diary entry for {session.date}.', ephemeral=True)

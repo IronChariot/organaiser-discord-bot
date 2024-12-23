@@ -1,6 +1,9 @@
 import importlib
 import asyncio
 from dataclasses import dataclass
+from functools import wraps
+import discord
+from discord.ext import commands
 
 from .msgtypes import Channel
 
@@ -10,6 +13,14 @@ HOOK_NAMES = (
     'system_prompt',
     'post_session_end',
 )
+
+def wrap_discord_command(bot, func, *args, **kwargs):
+    @bot.tree.command(*args, **kwargs)
+    @wraps(func)
+    async def wrapper(interaction: discord.Interaction):
+        return await func(bot, interaction)
+
+    return wrapper
 
 
 class Plugin:
@@ -51,6 +62,10 @@ class Plugin:
                 setattr(self, name, msg)
                 self._pinned_messages.append(msg)
 
+            if hasattr(method, '_discord_command'):
+                args, kwargs = method._discord_command
+                setattr(self, name, wrap_discord_command(bot, method, *args, **kwargs))
+
     def _get_hooks(self, name):
         return self._hooks.get(name, ())
 
@@ -64,9 +79,6 @@ class Plugin:
             return self.__bot.send_message(channel_obj, message)
         else:
             return asyncio.gather()
-
-    def register_discord_commands(self, tree):
-        pass
 
 
 def hook(name):
@@ -96,6 +108,14 @@ def pinned_message(*, header, discord_view=None):
     def decorator(func):
         func._pin_header = header
         func._pin_discord_view = discord_view
+        return func
+
+    return decorator
+
+
+def discord_command(*args, **kwargs):
+    def decorator(func):
+        func._discord_command = (args, kwargs)
         return func
 
     return decorator

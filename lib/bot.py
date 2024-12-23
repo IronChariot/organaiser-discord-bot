@@ -66,9 +66,6 @@ class Bot(discord.Client):
             if config.get('enabled'):
                 self.load_plugin(plugin, config)
 
-        for plugin in self.plugins.values():
-            plugin.register_discord_commands(self)
-
     def get_channel(self, channel):
         #TODO better system for channels
         if channel == Channel.CHAT:
