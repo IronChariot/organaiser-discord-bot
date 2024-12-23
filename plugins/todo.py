@@ -28,6 +28,17 @@ class TodoListView(discord.ui.View):
 class TodoPlugin(Plugin):
     """Allows the assistant to keep track of a list of TODO items."""
 
+    @hook('system_prompt')
+    async def on_system_prompt(self):
+        return (
+            'It may optionally contain a key "todo_action" and "todo_text", '
+            'which will be used to add or remove an item from today\'s todo '
+            'list. The todo_text be be a string that is the exact text of the '
+            'todo item, or a list of such strings if you wish to add or remove '
+            'multiple items at once. The todo_action should either be "add" or '
+            '"remove".'
+        )
+
     @pinned_message(header='## Current TODOs', discord_view=TodoListView)
     async def todo_list_message(self):
         with self.assistant.open_memory_file('todo.json', default='[]') as fh:
