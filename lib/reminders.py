@@ -108,10 +108,22 @@ class Reminders:
         self.load(open(self.filename, 'r'))
 
     def __str__(self):
-        # Order the reminders by time, starting with the next one
-        self.reminders.sort(key=lambda x: x.time)
-        reminders_string = '\n'.join([str(reminder) for reminder in self.reminders])
-        return reminders_string
+        return self.as_text(None)
+
+    def as_text(self, tz):
+        result = []
+
+        for reminder in sorted(self.reminders, key=lambda r: r.time):
+            time = reminder.time
+            if tz is not None:
+                time = time.astimezone(tz)
+
+            text = f'{time.strftime('%Y-%m-%d %H:%M')}: {reminder.text}'
+            if reminder.repeat:
+                text += f' (repeats every {reminder.repeat_interval})'
+            result.append(text)
+
+        return '\n'.join(result)
 
     def as_markdown(self, tz, cutoff=2000):
         result = []

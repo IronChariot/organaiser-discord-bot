@@ -188,7 +188,7 @@ class Session:
 
         # Get the reminders string:
         reminders_string = "# Currently scheduled reminders:\n"
-        reminders_string += str(self.assistant.reminders)
+        reminders_string += self.assistant.reminders.as_text(self.assistant.timezone)
 
         system_prompt = self.message_history[0].content + \
                         todo_string + \
