@@ -7,6 +7,7 @@ from .msgtypes import Channel
 
 HOOK_NAMES = (
     'configure',
+    'system_prompt',
     'post_session_end',
 )
 
@@ -69,7 +70,7 @@ class Plugin:
 
 
 def hook(name):
-    assert name in HOOK_NAMES, 'Invalid hook'
+    assert name in HOOK_NAMES, f"Invalid hook '{name}'"
 
     def decorator(func):
         func._hook_name = name

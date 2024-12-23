@@ -21,9 +21,6 @@ class Model(ABC):
         self.max_tokens = max_tokens
         self.logger = logger or logging.getLogger(__name__)
 
-    def describe_image_parameters(self):
-        return "However, the current model does NOT support image generation."
-
     async def query(self, messages: List[Message], system_prompt=None, validate_func=None, as_json=False) -> str:
         temperature = self.temperature
         max_attempts = int((1.0 - temperature) / 0.1) + 1  # Calculate max attempts to reach t=1.0
@@ -172,7 +169,7 @@ class AnthropicModel(Model):
 
 
 class OpenAIModel(Model):
-    def __init__(self, model_name: str, image_model_name: Optional[str] = None, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
+    def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
         if model_name == "gpt-4o":
             model_name = "gpt-4o-2024-11-20" # $2.5/$10
         elif model_name == "gpt-4o-mini":
@@ -184,33 +181,8 @@ class OpenAIModel(Model):
         else:
             model_name = "gpt-4o-mini-2024-07-18"  # Default to GPT-4o Mini
             print("Invalid model specified. Defaulting to GPT-4o Mini.")
-        if image_model_name is None:
-            image_model_name = "dall-e-2"
-        self.image_model_name = image_model_name
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         self.client = AsyncOpenAI()
-
-    def describe_image_parameters(self):
-        if self.image_model_name == "dall-e-2":
-            return 'The image model is DALL·E 2, which requires a "prompt" string ' \
-                   'describing the desired ' \
-                   'image in exquisite detail, a "size" string with the desired ' \
-                   'size which MUST be one of "256x256", "512x512" or "1024x1024", ' \
-                   '(if the user explicitly specifies a different size, choose the ' \
-                   'closest size and inform them)'
-        elif self.image_model_name == "dall-e-3":
-            return 'The image model is DALL·E 3, which requires a "prompt" string ' \
-                   'describing the desired ' \
-                   'image in exquisite detail, a "size" string with the desired ' \
-                   'size which MUST be one of "1024x1024", "1024x1792" or "1792x1024" ' \
-                   '(if the user explicitly specifies a different size, choose the ' \
-                   'closest size and inform them), a "quality" string which must be ' \
-                   '"standard" except if the user explicitly requested a high ' \
-                   'quality image in which case it should be "hd", and a "style" ' \
-                   'string which should be "natural" for a natural-looking image ' \
-                   'or "vivid" for a hyper-real, dramatic image.'
-        else:
-            return f'Actually, image generation DOES NOT WORK! Let them know that the configuration specifies the invalid model "{self.image_model_name}".'
 
     def encode_message(self, message):
         encoded = {"role": message.role.value}
@@ -243,17 +215,6 @@ class OpenAIModel(Model):
         except Exception as e:
             print("Error: " + str(e))
             return "Error querying the LLM: " + str(e)
-
-    async def generate_image(self, prompt: str, size: str, quality: str = "standard", style: str = "natural"):
-        response = await self.client.images.generate(
-            model=self.image_model_name,
-            prompt=prompt,
-            size=size,
-            quality=quality,
-            style=style,
-            n=1)
-
-        return Attachment(response.data[0].url, "image/png")
 
 
 class OpenRouterModel(Model):

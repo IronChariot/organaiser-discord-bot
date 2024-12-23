@@ -20,10 +20,9 @@ MEMORY_DIR = pathlib.Path(__file__).parent.parent.resolve() / 'memory'
 
 
 class Assistant:
-    def __init__(self, id, model, image_model=None):
+    def __init__(self, id, model):
         self.id = id
         self.model = model
-        self.image_model = image_model
         self.temperature = 1.0
         self.max_tokens = 1024
         self.prompt_template = []
@@ -57,11 +56,10 @@ class Assistant:
         ident = data.get('id', ident)
 
         model_name = data['model']
-        image_model_name = data.get('image_model')
         if model_name.startswith('claude-'):
             model = models.AnthropicModel(model_name)
         elif model_name.startswith('gpt-'):
-            model = models.OpenAIModel(model_name, image_model_name)
+            model = models.OpenAIModel(model_name)
         elif model_name.startswith('openrouter-'):
             model = models.OpenRouterModel(model_name)
         elif model_name.startswith('gemini-'):
@@ -69,16 +67,7 @@ class Assistant:
         else:
             model = models.OllamaModel(model_name)
 
-        if image_model_name or os.environ.get('OPENAI_API_KEY'):
-            # For now all image generation goes through OpenAI
-            if isinstance(model, models.OpenAIModel):
-                image_model = model
-            else:
-                image_model = models.OpenAIModel('gpt-4o-mini', image_model_name)
-        else:
-            image_model = None
-
-        ass = Assistant(ident, model, image_model)
+        ass = Assistant(ident, model)
         if 'temperature' in data:
             ass.temperature = data['temperature']
         if 'max_tokens' in data:

@@ -26,10 +26,6 @@ class Session:
         self.context_lock = asyncio.Lock()
 
         self.standard_format_prompt = FORMAT_PROMPT
-        if assistant.image_model:
-            self.standard_format_prompt += ' ' + assistant.image_model.describe_image_parameters()
-        else:
-            self.standard_format_prompt += ' Actually, the current configuration does NOT support image generation.'
 
     def get_next_rollover(self):
         "Returns the datetime at which this session should end."

@@ -19,6 +19,12 @@ from . import views
 MESSAGE_LIMIT = 2000
 
 
+async def make_discord_file(attachment):
+    data = await attachment.read()
+    filename = urlparse(attachment.url).path.replace('\\', '/').rsplit('/', 1)[-1]
+    return discord.File(BytesIO(data), filename)
+
+
 class Retry(discord.ui.View):
     def __init__(self):
         super().__init__()
@@ -76,16 +82,7 @@ class Bot(discord.Client):
         elif channel == Channel.BUGS:
             return self.bugs_channel
 
-    async def send_message(self, channel, message, file_futures=[]):
-        files = []
-        exceptions = []
-        if file_futures:
-            for i, result in enumerate(await asyncio.gather(*file_futures, return_exceptions=True)):
-                if isinstance(result, Exception):
-                    exceptions.append((i, result))
-                else:
-                    files.append(result)
-
+    async def send_message(self, channel, message, files=[]):
         limit = MESSAGE_LIMIT
         if len(message) > limit and '```' in message:
             # Hard case, preserve preformatted blocks across split messages.
@@ -127,6 +124,44 @@ class Bot(discord.Client):
         elif files:
             last_msg = await channel.send(files=files)
 
+        else:
+            return None
+
+        return last_msg
+
+    async def send_message_with_action_results(self, channel, message, *, actions_taken=[], futures=[]):
+        file_futures = []
+        exceptions = []
+
+        for fut in asyncio.as_completed(futures):
+            try:
+                results = await fut
+                if isinstance(results, Attachment) or isinstance(results, str):
+                    results = [results]
+
+                for result in results:
+                    if isinstance(result, Attachment):
+                        file_futures.append(asyncio.create_task(make_discord_file(result)))
+                    elif isinstance(result, str):
+                        actions_taken.append(result)
+
+            except Exception as exc:
+                exceptions.append(exc)
+
+        files = []
+        if file_futures:
+            for fut in asyncio.as_completed(file_futures):
+                try:
+                    files.append(await fut)
+                except Exception as exc:
+                    exceptions.append(exc)
+
+        # Add a log of actions taken in small text
+        if actions_taken:
+            message = '\n-# '.join([message or ''] + actions_taken)
+
+        await self.send_message(channel, message, files=files)
+
         # Let the AI know about the exceptions.
         if exceptions:
             if len(files) == 1:
@@ -136,13 +171,11 @@ class Bot(discord.Client):
             else:
                 text = f'SYSTEM: Sent message without attachments due to the following errors:'
 
-            for i, exception in exceptions:
+            for exception in exceptions:
                 msg = str(getattr(exception, 'message', None) or exception)
-                text += f'\nAttachment {i}: {msg}'
+                text += f'\n{msg}'
 
             asyncio.create_task(self.respond(text))
-
-        return last_msg
 
     async def respond(self, content, message=None, attachments=[]):
         """Respond to input from the user or the system."""
@@ -176,17 +209,8 @@ class Bot(discord.Client):
 
         response_time = datetime.now(tz=timezone.utc)
 
-        # Any images we need to generate can be done in parallel
-        image_futures = []
-        if 'images' in response and self.assistant.image_model:
-            images = response['images']
-            if isinstance(images, dict):
-                images = [images]
-
-            for image in images:
-                image_futures.append(asyncio.create_task(self.generate_image(**image)))
-
         futures = []
+        action_futures = []
         actions_taken = []
         if self.log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
@@ -208,10 +232,9 @@ class Bot(discord.Client):
             self.current_checkin_task = asyncio.create_task(self.perform_checkin(response_time, response['prompt_after']))
 
         actions = set(self.__actions[key] for key in response if key in self.__actions)
-        results = await asyncio.gather(*(action(**{key: response.get(key) for key in action._action_keys}) for action in actions))
-        for result in results:
-            if result is not None:
-                actions_taken.append(result)
+        for action in actions:
+            task = asyncio.create_task(action(**{key: response.get(key) for key in action._action_keys}))
+            action_futures.append(task)
 
         if 'long_term_goals_action' in response:
             long_term_goal_action = response['long_term_goals_action']
@@ -264,12 +287,8 @@ class Bot(discord.Client):
                 chat = reactions
                 reactions = None
 
-            if chat or image_futures:
-                # Add a log of actions taken in small text
-                if actions_taken:
-                    chat = '\n-# '.join([chat] + actions_taken)
-
-                futures.insert(0, self.send_message(self.chat_channel, chat, image_futures))
+            if chat or action_futures:
+                futures.insert(0, self.send_message_with_action_results(self.chat_channel, chat, actions_taken=actions_taken, futures=action_futures))
 
         if message and reactions:
             for emoji in split_emoji(reactions):
@@ -305,12 +324,6 @@ class Bot(discord.Client):
             report = f' - [User message]({message.jump_url})\n{report}'
 
         await self.send_message(self.bugs_channel, report)
-
-    async def generate_image(self, **kwargs):
-        img = await self.assistant.image_model.generate_image(**kwargs)
-        data = await img.read()
-        filename = urlparse(img.url).path.replace('\\', '/').rsplit('/', 1)[-1]
-        return discord.File(BytesIO(data), filename)
 
     async def add_timed_reminder(self, reminder):
         if not self.assistant.reminders.add_reminder(reminder):
@@ -576,6 +589,9 @@ class Bot(discord.Client):
 
             self.session = await self.assistant.load_session(date, old_session)
 
+            for prompt in await asyncio.gather(*self.call_hooks('system_prompt')):
+                self.session.standard_format_prompt += '\n' + prompt.strip()
+
             if self.log_channel:
                 futures.append(self.send_message(self.log_channel, self.session.initial_system_prompt))
 
@@ -597,6 +613,9 @@ class Bot(discord.Client):
             await asyncio.gather(*futures)
 
     async def setup_hook(self):
+        for prompt in await asyncio.gather(*self.call_hooks('system_prompt')):
+            self.session.standard_format_prompt += '\n' + prompt.strip()
+
         self.rollover_lock = asyncio.Lock()
 
         rollover_time = self.assistant.rollover.replace(tzinfo=self.assistant.timezone)
@@ -645,5 +664,6 @@ class Bot(discord.Client):
             self.__actions[key] = func
 
     def call_hooks(self, name, *args, **kwargs):
-        for hook in self.__hooks[name]:
-            yield hook(*args, **kwargs)
+        for hooks in self.__hooks[name]:
+            for hook in hooks:
+                yield hook(*args, **kwargs)
