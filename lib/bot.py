@@ -12,7 +12,7 @@ from collections import defaultdict
 from .util import split_message, split_emoji, format_json_md
 from .reminders import Reminders, Reminder
 from .msgtypes import UserMessage, Attachment, Channel
-from .plugin import Plugin
+from .plugin import Plugin, PinnedMessage
 from . import views
 
 # Max chars Discord allows to be sent per message
@@ -43,10 +43,6 @@ class Bot(discord.Client):
         self.diary_channel = None
         self.query_channel = None
         self.bugs_channel = None
-        self.todo_list_message = None
-        self.todo_list_view = None
-        self.reminder_list_message = None
-        self.reminder_list_view = None
         self.current_checkin_task = None
 
         intents = discord.Intents.default()
@@ -58,6 +54,8 @@ class Bot(discord.Client):
 
         self.plugins = {}
         self.__hooks = defaultdict(list)
+        self.__pinned_messages = []
+        self.__actions = {}
         for plugin, config in self.assistant.plugin_config.items():
             if config.get('enabled'):
                 self.load_plugin(plugin, config)
@@ -209,18 +207,11 @@ class Bot(discord.Client):
 
             self.current_checkin_task = asyncio.create_task(self.perform_checkin(response_time, response['prompt_after']))
 
-        # Take care of the todo list and long term goals list
-        if 'todo_action' in response:
-            todo_action = response['todo_action']
-            todo_text = response['todo_text']
-            # Check if todo_text is a string, or a list of strings:
-            todo_text_list = [todo_text] if isinstance(todo_text, str) else todo_text
-            futures.append(self.update_todo(todo_action, todo_text_list))
-            plural_s = 's' if len(todo_text_list) != 1 else ''
-            if todo_action == 'add':
-                actions_taken.append(f'Added {len(todo_text_list)} todo item{plural_s}')
-            elif todo_action == 'remove':
-                actions_taken.append(f'Removed {len(todo_text_list)} todo item{plural_s}')
+        actions = set(self.__actions[key] for key in response if key in self.__actions)
+        results = await asyncio.gather(*(action(**{key: response.get(key) for key in action._action_keys}) for action in actions))
+        for result in results:
+            if result is not None:
+                actions_taken.append(result)
 
         if 'long_term_goals_action' in response:
             long_term_goal_action = response['long_term_goals_action']
@@ -332,63 +323,10 @@ class Bot(discord.Client):
 
         # Update the pinned reminders message
         if self.chat_channel:
-            await self.update_reminders_message()
+            await self.reminders_message.update()
 
-    async def update_reminders_message(self):
-        if not self.reminder_list_message:
-            return
-
-        header = '## Current Reminders\n\n'
-        reminders_text = header + self.assistant.reminders.as_markdown(self.assistant.timezone)
-
-        view = self.reminder_list_view
-        await self.reminder_list_message.edit(content=reminders_text, view=view)
-
-    async def update_todo_message(self):
-        if not self.todo_list_message:
-            return
-
-        with self.assistant.open_memory_file('todo.json', default='[]') as fh:
-            todos_json = fh.read().strip()
-
-        todos_list = json.loads(todos_json) if todos_json else []
-
-        header = '## Current TODOs\n'
-        todos_text = header + '\n - ' + '\n - '.join(todos_list)
-
-        view = self.todo_list_view
-        await self.todo_list_message.edit(content=todos_text, view=view)
-
-    async def update_todo(self, todo_action, todo_text_list):
-        # Get the list of existing todos, if any:
-        with self.assistant.open_memory_file('todo.json', default='[]') as fh:
-            todos_json = fh.read().strip()
-
-        todos_list = json.loads(todos_json) if todos_json else []
-
-        if todo_action == 'add':
-            for todo_text in todo_text_list:
-                if todo_text not in todos_list:
-                    todos_list.append(todo_text)
-
-        elif todo_action == 'remove':
-            for todo_text in todo_text_list:
-                if todo_text in todos_list:
-                    todos_list.remove(todo_text)
-                # Also correctly deal with it if the bot put the whole '- ' at the front of the todo text
-                elif todo_text.startswith('- ') and todo_text[2:] in todos_list:
-                    todos_list.remove(todo_text[2:])
-
-        else:
-            return
-
-        # Write the dict back to file
-        with self.assistant.open_memory_file('todo.json', 'w') as fh:
-            json.dump(todos_list, fh)
-
-        # Update the pinned to do message
-        if self.chat_channel:
-            await self.update_todo_message()
+    async def get_reminders_message(self):
+        return self.assistant.reminders.as_markdown(self.assistant.timezone)
 
     async def update_long_term_goals(self, long_term_goal_action, long_term_goal_text_list):
         # Get the list of existing long term goals, if any:
@@ -463,6 +401,10 @@ class Bot(discord.Client):
     async def on_ready(self):
         print(f'{self.user} has connected to Discord!')
 
+        # Reset these if necessary
+        for pin in self.__pinned_messages:
+            pin._discord_message = None
+
         config = self.assistant.discord_config
         chat_channel_name = config.get('chat_channel')
         log_channel_name = config.get('log_channel')
@@ -478,43 +420,55 @@ class Bot(discord.Client):
         self.bugs_channel = discord.utils.get(all_channels, name=bugs_channel_name) if bugs_channel_name else None
 
         # Do this in the background, it takes a long time
-        if self.chat_channel:
+        if False and self.chat_channel:
             guild = self.chat_channel.guild
             self.tree.copy_global_to(guild=guild)
             sync_task = asyncio.create_task(self.tree.sync(guild=guild))
+        else:
+            sync_task = None
 
         if self.chat_channel:
-            for pin in await self.chat_channel.pins():
-                if not pin.content:
+            pin_messages = []
+
+            for message in await self.chat_channel.pins():
+                if not message.content:
                     continue
 
-                content = pin.content + '\n'
-                if content.startswith('## Current TODOs\n'):
-                    self.todo_list_message = pin
-                elif content.startswith('## Current Reminders\n'):
+                content = message.content.split('\n', 1)[0]
+
+                for pin in self.__pinned_messages:
+                    if content == pin.header:
+                        print("Got message", pin, pin._func, message)
+                        pin._discord_message = message
+                        if not message.pinned:
+                            pin_messages.append(message)
+                        break
+
+                if content.startswith('## Current Reminders\n'):
                     self.reminder_list_message = pin
 
-            if not self.todo_list_message:
-                self.todo_list_message = await self.chat_channel.send('## Current TODOs', view=self.todo_list_view)
-            if not self.reminder_list_message:
-                self.reminder_list_message = await self.chat_channel.send('## Current Reminders', view=self.reminder_list_view)
+            for pin in self.__pinned_messages:
+                if not pin._discord_message:
+                    print("Making new pinned message", pin, pin._func, pin.header)
+                    message = await self.chat_channel.send(content=pin.header, view=pin._discord_view)
+                    pin._discord_message = message
+                    pin_messages.append(message)
 
             try:
-                if not self.todo_list_message.pinned:
-                    await self.todo_list_message.pin()
-                if not self.reminder_list_message.pinned:
-                    await self.reminder_list_message.pin()
+                for message in pin_messages:
+                    await message.pin()
             except:
                 close_btn = views.CloseButton()
                 close_btn.message = await self.chat_channel.send('### ⚠️ **Error**\nPinning failed, please pin the above message(s) manually.', view=close_btn, delete_after=180)
 
-            await self.update_reminders_message()
-            await self.update_todo_message()
+            await asyncio.gather(*(pin.update() for pin in self.__pinned_messages))
+            print("Updated pinned messages")
 
         # Check if any messages came in while we were down
         await self.check_downtime_messages()
 
-        await sync_task
+        if sync_task:
+            await sync_task
 
     async def check_downtime_messages(self):
         if not self.chat_channel:
@@ -637,7 +591,7 @@ class Bot(discord.Client):
             futures.append(self.log_channel.send(f'Finished rollover to day {date}'))
 
         if self.chat_channel:
-            futures.append(self.update_reminders_message())
+            futures.append(self.reminders_message.update())
 
         if futures:
             await asyncio.gather(*futures)
@@ -654,10 +608,17 @@ class Bot(discord.Client):
         for reminder in self.assistant.reminders.get_reminders_before(next_rollover):
             asyncio.create_task(self.send_reminder(reminder))
 
-        self.reminder_list_view = views.ReminderListView(self)
-        self.todo_list_view = views.TodoListView(self)
-        self.add_view(self.reminder_list_view)
-        self.add_view(self.todo_list_view)
+        self.reminders_message = PinnedMessage(self.get_reminders_message,
+                                               header='## Current Reminders',
+                                               discord_view=views.ReminderListView(self))
+        self.__pinned_messages.append(self.reminders_message)
+        self.add_view(self.reminders_message._discord_view)
+
+        for plugin in self.plugins.values():
+            for pin in plugin._pinned_messages:
+                view = pin._init_discord_view(plugin=plugin, bot=self)
+                if view is not None:
+                    self.add_view(view)
 
         # Check when the next check-in should be
         message = self.session.get_last_assistant_message()
@@ -674,8 +635,14 @@ class Bot(discord.Client):
     def load_plugin(self, name, config):
         plugin = Plugin.load(name, self, config)
         self.plugins[name] = plugin
-        for name, hook in plugin.hooks:
+        for name, hook in plugin._hooks.items():
             self.__hooks[name].append(hook)
+
+        for pinned_msg in plugin._pinned_messages:
+            self.__pinned_messages.append(pinned_msg)
+
+        for key, func in plugin._actions.items():
+            self.__actions[key] = func
 
     def call_hooks(self, name, *args, **kwargs):
         for hook in self.__hooks[name]:

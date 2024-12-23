@@ -1,4 +1,4 @@
-from lib.plugin import Plugin
+from lib.plugin import Plugin, hook
 from lib.msgtypes import Channel
 
 import discord
@@ -14,9 +14,11 @@ DEFAULT_PROMPT = (
 
 
 class DiaryPlugin(Plugin):
-    async def on_config(self, config):
+    @hook('configure')
+    async def on_configure(self, config):
         self.prompt = config.get('prompt', DEFAULT_PROMPT)
 
+    @hook('post_session_end')
     async def on_post_session_end(self, session):
         path = self._get_entry_path(session)
         if not path.exists():

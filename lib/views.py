@@ -62,8 +62,6 @@ class EditMemoryFileModal(discord.ui.Modal, title='Edit'):
 
         if self.filename == 'reminders.json':
             asyncio.create_task(self.bot.update_reminders_message())
-        elif self.filename == 'todo.json':
-            asyncio.create_task(self.bot.update_todo_message())
 
 
 class ReminderListView(discord.ui.View):
@@ -74,37 +72,4 @@ class ReminderListView(discord.ui.View):
     @discord.ui.button(label='Edit', style=discord.ButtonStyle.secondary, emoji='✏️', custom_id='reminder_list:edit')
     async def btn_edit(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = EditMemoryFileModal(self.bot, 'reminders.json')
-        await interaction.response.send_modal(modal)
-
-
-class AddTodoModal(discord.ui.Modal, title='Add Todo'):
-    text = discord.ui.TextInput(
-        label='Text',
-        placeholder='Do things with stuff',
-        required=True,
-    )
-
-    def __init__(self, bot):
-        super().__init__()
-        self.bot = bot
-
-    async def on_submit(self, interaction: discord.Interaction):
-        text = self.text.value.strip()
-        await interaction.response.send_message(f'Added', ephemeral=True, silent=True, delete_after=0.001)
-        await self.bot.update_todo('add', [text])
-
-
-class TodoListView(discord.ui.View):
-    def __init__(self, bot):
-        super().__init__(timeout=None)
-        self.bot = bot
-
-    @discord.ui.button(label='Edit', style=discord.ButtonStyle.secondary, emoji='✏️', custom_id='todo_list:edit')
-    async def btn_edit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = EditMemoryFileModal(self.bot, 'todo.json')
-        await interaction.response.send_modal(modal)
-
-    @discord.ui.button(label='Add', style=discord.ButtonStyle.secondary, emoji='➕', custom_id='todo_list:add')
-    async def btn_add(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = AddTodoModal(self.bot)
         await interaction.response.send_modal(modal)
