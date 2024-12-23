@@ -433,7 +433,7 @@ class Bot(discord.Client):
         self.bugs_channel = discord.utils.get(all_channels, name=bugs_channel_name) if bugs_channel_name else None
 
         # Do this in the background, it takes a long time
-        if False and self.chat_channel:
+        if self.chat_channel:
             guild = self.chat_channel.guild
             self.tree.copy_global_to(guild=guild)
             sync_task = asyncio.create_task(self.tree.sync(guild=guild))
@@ -451,7 +451,6 @@ class Bot(discord.Client):
 
                 for pin in self.__pinned_messages:
                     if content == pin.header:
-                        print("Got message", pin, pin._func, message)
                         pin._discord_message = message
                         if not message.pinned:
                             pin_messages.append(message)
@@ -462,7 +461,6 @@ class Bot(discord.Client):
 
             for pin in self.__pinned_messages:
                 if not pin._discord_message:
-                    print("Making new pinned message", pin, pin._func, pin.header)
                     message = await self.chat_channel.send(content=pin.header, view=pin._discord_view)
                     pin._discord_message = message
                     pin_messages.append(message)
@@ -475,7 +473,6 @@ class Bot(discord.Client):
                 close_btn.message = await self.chat_channel.send('### ⚠️ **Error**\nPinning failed, please pin the above message(s) manually.', view=close_btn, delete_after=180)
 
             await asyncio.gather(*(pin.update() for pin in self.__pinned_messages))
-            print("Updated pinned messages")
 
         # Check if any messages came in while we were down
         await self.check_downtime_messages()
