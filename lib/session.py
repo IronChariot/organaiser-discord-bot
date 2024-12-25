@@ -70,22 +70,23 @@ class Session:
 
         self._rewrite_message_file()
 
-    def append_message(self, message):
-        self.append_messages((message,))
+    def push_message(self, message: Message):
+        return self.push_messages((message,))
 
-    def append_messages(self, messages):
+    async def push_messages(self, messages):
         """Appends messages to the message history.
         Messages will be timestamped if they have not already been."""
 
-        self.message_history.extend(messages)
-        for message in messages:
-            if message.timestamp is None:
-                message.timestamp = datetime.now(tz=timezone.utc)
-            message.dump(self.messages_file)
-        self.messages_file.flush()
+        async with self.context_lock:
+            self.message_history.extend(messages)
+            for message in messages:
+                if message.timestamp is None:
+                    message.timestamp = datetime.now(tz=timezone.utc)
+                message.dump(self.messages_file)
+            self.messages_file.flush()
 
-        if any(message.role == Role.USER for message in messages):
-            self.new_user_message.notify_all()
+            if any(message.role == Role.USER for message in messages):
+                self.new_user_message.notify_all()
 
     def get_last_assistant_message(self):
         for message in self.message_history[::-1]:
@@ -193,7 +194,7 @@ class Session:
 
         self.last_activity = datetime.now()
 
-        self.append_message(message)
+        await self.push_message(message)
         return await self.query_assistant_response()
 
     async def query_assistant_response(self) -> Optional[AssistantResponse]:

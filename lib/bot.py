@@ -153,11 +153,11 @@ class Bot(discord.Client):
 
                 print(f'Checking in due to user inactivity for {elapsed} minutes.')
                 if elapsed == 0:
-                    self.session.append_message(self.make_user_message(f'(Immediately thereafter…)'))
+                    await self.session.push_message(self.make_user_message(f'(Immediately thereafter…)'))
                 elif elapsed == 1:
-                    self.session.append_message(self.make_user_message(f'(One minute later…)'))
+                    await self.session.push_message(self.make_user_message(f'(One minute later…)'))
                 else:
-                    self.session.append_message(self.make_user_message(f'({elapsed} minutes later…)'))
+                    await self.session.push_message(self.make_user_message(f'({elapsed} minutes later…)'))
 
             try:
                 async with self.chat_channel.typing():
@@ -461,7 +461,7 @@ class Bot(discord.Client):
                 new_messages.append(message)
 
             new_messages.append(self.make_user_message('SYSTEM: End of missed messages.'))
-            self.session.append_messages(new_messages)
+            await self.session.push_messages(new_messages)
 
     async def on_message(self, message):
         if message.author == self.user:
@@ -472,7 +472,7 @@ class Bot(discord.Client):
 
         if message.channel == self.chat_channel:
             msg = self.make_user_message(f'{message.author.display_name}: {message.content}', message, message.attachments)
-            self.session.append_message(msg)
+            await self.session.push_message(msg)
 
         if message.channel == self.query_channel:
             async with message.channel.typing():
