@@ -45,7 +45,6 @@ class DiaryPlugin(Plugin):
 
         session = bot.session
         entry = await self._write_diary_entry(session)
-        print(self, entry, self.send_message)
         await self.send_message(entry, channel=Channel.DIARY)
 
         await interaction.followup.send(f'Wrote diary entry for {session.date}.', ephemeral=True)

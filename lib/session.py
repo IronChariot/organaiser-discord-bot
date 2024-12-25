@@ -3,6 +3,7 @@ import pathlib
 import asyncio
 from datetime import datetime, time, timedelta
 
+from .response import AssistantResponse
 from .msgtypes import Role, Message, SystemMessage, UserMessage, AssistantMessage
 
 # Format prompt comes from session_format_prompt.txt
@@ -26,6 +27,10 @@ class Session:
         self.context_lock = asyncio.Lock()
 
         self.standard_format_prompt = FORMAT_PROMPT
+
+        for plugin in assistant.plugins.values():
+            for prompt in plugin._static_system_prompts:
+                self.standard_format_prompt += '\n' + prompt(self)
 
     def get_next_rollover(self):
         "Returns the datetime at which this session should end."
@@ -170,32 +175,13 @@ class Session:
 
         self.last_activity = datetime.now()
 
-        # First, get the contents of the todo file and long term goals file
-        with self.assistant.open_memory_file('todo.json') as fh:
-            todo_json = fh.read()
-        todo_dict = json.loads(todo_json)
-        todo_string = "# Today's TODO:\n"
-        for todo_text in todo_dict:
-            todo_string += f"- {todo_text}\n"
-        todo_string += "\n"
-
-        with self.assistant.open_memory_file('long_term_goals.json') as fh:
-            long_term_goals = fh.read()
-        long_term_goals_string = "# Long term goals:\n"
-        for long_term_goal_text in long_term_goals:
-            long_term_goals_string += f"- {long_term_goal_text}\n"
-        long_term_goals_string += "\n"
-
-        # Get the reminders string:
-        reminders_string = "# Currently scheduled reminders:\n"
-        reminders_string += self.assistant.reminders.as_text(self.assistant.timezone)
-
         system_prompt = self.message_history[0].content + \
-                        todo_string + \
-                        long_term_goals_string + \
-                        reminders_string + \
                         "\n\n" + \
                         self.standard_format_prompt
+
+        for plugin in self.assistant.plugins.values():
+            for prompt in plugin._dynamic_system_prompts:
+                system_prompt += '\n\n' + prompt(self)
 
         async with self.context_lock:
             # Check if we need to summarise before adding new message
@@ -205,7 +191,7 @@ class Session:
             self.message_history.append(message)
 
             try:
-                response = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
+                data = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
             except:
                 if self.message_history[-1] == message:
                     self.message_history.pop()
@@ -214,6 +200,8 @@ class Session:
             self.message_history[-2].dump(self.messages_file)
             self.message_history[-1].dump(self.messages_file)
             self.messages_file.flush()
+
+            response = AssistantResponse(self, data)
 
         return response
 

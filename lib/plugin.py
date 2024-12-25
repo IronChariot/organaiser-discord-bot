@@ -1,7 +1,8 @@
 import importlib
 import asyncio
-from dataclasses import dataclass
-from functools import wraps
+import inspect
+from datetime import datetime
+
 import discord
 from discord.ext import commands
 
@@ -9,19 +10,11 @@ from .msgtypes import Channel
 
 
 HOOK_NAMES = (
+    'init',
+    'session_load',
     'configure',
-    'system_prompt',
     'post_session_end',
 )
-
-def wrap_discord_command(bot, func, *args, **kwargs):
-    @bot.tree.command(*args, **kwargs)
-    @wraps(func)
-    async def wrapper(interaction: discord.Interaction):
-        return await func(bot, interaction)
-
-    return wrapper
-
 
 class Plugin:
     _registry = {}
@@ -31,21 +24,25 @@ class Plugin:
         Plugin._registry[cls.__module__] = cls
 
     @classmethod
-    def load(cls, name, bot, config):
+    def load(cls, name, assistant):
         name = f'plugins.{name}'
         if name not in cls._registry:
             importlib.import_module(name)
 
-        plugin = cls._registry[name](bot)
-        for hook in plugin._get_hooks('configure'):
-            asyncio.run(hook(config))
+        plugin = cls._registry[name](assistant)
+        asyncio.run(plugin._async_init())
         return plugin
 
-    def __init__(self, bot):
-        self.__bot = bot
+    def __init__(self, assistant):
+        self.__assistant = assistant
+        self._bot = None
         self._hooks = {}
         self._actions = {}
         self._pinned_messages = []
+        self._discord_commands = []
+        self._static_system_prompts = []
+        self._dynamic_system_prompts = []
+        self._scheduled_tasks = set()
 
         for name in dir(self):
             method = getattr(self, name)
@@ -63,20 +60,76 @@ class Plugin:
                 self._pinned_messages.append(msg)
 
             if hasattr(method, '_discord_command'):
-                args, kwargs = method._discord_command
-                setattr(self, name, wrap_discord_command(bot, method, *args, **kwargs))
+                self._discord_commands.append(method)
+
+            if hasattr(method, '_dynamic_system_prompt'):
+                self._dynamic_system_prompts.append(method)
+            elif hasattr(method, '_static_system_prompt'):
+                self._static_system_prompts.append(method)
+
+    async def _async_init(self):
+        self._bot_future = asyncio.Future()
+
+        for hook in self._get_hooks('init'):
+            await hook()
+
+    def _init_bot(self, bot):
+        self._bot = bot
+        self._bot_future.set_result(bot)
 
     def _get_hooks(self, name):
+        """Returns a list of registered hooks with the given name."""
         return self._hooks.get(name, ())
 
     @property
     def assistant(self):
-        return self.__bot.assistant
+        """Returns the Assistant object, which will not change for this instance
+        of the Plugin."""
+        return self.__assistant
+
+    def schedule(self, when, coro, /):
+        """Schedules the given coroutine to run at the specified datetime.
+        If when is in the past, it will be scheduled right away.
+        Returns an object that can be cancelled or awaited."""
+
+        assert when.tzinfo is not None and when.tzinfo.utcoffset(when) is not None
+        assert inspect.iscoroutine(coro)
+
+        async def wait_and_run(when, coro):
+            begin_time = datetime.now(tz=when.tzinfo)
+            if when > begin_time:
+                await asyncio.sleep((when - begin_time).total_seconds())
+
+            try:
+                await asyncio.shield(coro)
+            except Exception as ex:
+                if self._bot is not None:
+                    await self._bot.write_bug_report(ex)
+                else:
+                    raise
+
+        task = asyncio.create_task(wait_and_run(when, coro))
+        task.add_done_callback(self._scheduled_tasks.discard)
+        self._scheduled_tasks.add(task)
+        return task
+
+    async def respond(self, msg, attachments=[]):
+        bot = self._bot
+        if bot is None:
+            # Wait for the bot to be initialized
+            bot = await self._bot_future
+
+        await bot.respond(msg, attachments=attachments)
 
     def send_message(self, message, *, channel=Channel.CHAT):
-        channel_obj = self.__bot.get_channel(channel)
+        """If this Assistant is running in a Discord bot, sends a message to
+        the specified channel, if that channel is configured.
+
+        Otherwise, does nothing."""
+
+        channel_obj = self._bot.get_channel(channel) if self._bot is not None else None
         if channel_obj is not None:
-            return self.__bot.send_message(channel_obj, message)
+            return self._bot.send_message(channel_obj, message)
         else:
             return asyncio.gather()
 
@@ -119,6 +172,21 @@ def discord_command(*args, **kwargs):
         return func
 
     return decorator
+
+
+def system_prompt(func=None, /, *, dynamic=False):
+    def decorator(func):
+        assert not inspect.iscoroutinefunction(func)
+        if dynamic:
+            func._dynamic_system_prompt = True
+        else:
+            func._static_system_prompt = True
+        return func
+
+    if func is not None:
+        return decorator(func)
+    else:
+        return decorator
 
 
 class PinnedMessage:

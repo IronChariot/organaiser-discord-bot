@@ -8,21 +8,14 @@ from io import BytesIO
 from urllib.parse import urlparse
 import traceback
 from collections import defaultdict
+from functools import wraps
 
-from .util import split_message, split_emoji, format_json_md
-from .reminders import Reminders, Reminder
+from .util import split_message, format_json_md
 from .msgtypes import UserMessage, Attachment, Channel
-from .plugin import Plugin, PinnedMessage
 from . import views
 
 # Max chars Discord allows to be sent per message
 MESSAGE_LIMIT = 2000
-
-
-async def make_discord_file(attachment):
-    data = await attachment.read()
-    filename = urlparse(attachment.url).path.replace('\\', '/').rsplit('/', 1)[-1]
-    return discord.File(BytesIO(data), filename)
 
 
 class Retry(discord.ui.View):
@@ -57,14 +50,17 @@ class Bot(discord.Client):
         super().__init__(intents=intents)
 
         self.tree = app_commands.CommandTree(self)
-
-        self.plugins = {}
-        self.__hooks = defaultdict(list)
         self.__pinned_messages = []
-        self.__actions = {}
-        for plugin, config in self.assistant.plugin_config.items():
-            if config.get('enabled'):
-                self.load_plugin(plugin, config)
+
+    def _register_command(self, func):
+        args, kwargs = func._discord_command
+
+        @self.tree.command(*args, **kwargs)
+        @wraps(func)
+        async def command(interaction: discord.Interaction):
+            return await func(self, interaction)
+
+        return command
 
     def get_channel(self, channel):
         #TODO better system for channels
@@ -81,7 +77,7 @@ class Bot(discord.Client):
 
     async def send_message(self, channel, message, files=[]):
         limit = MESSAGE_LIMIT
-        if len(message) > limit and '```' in message:
+        if message and len(message) > limit and '```' in message:
             # Hard case, preserve preformatted blocks across split messages.
             parts = list(split_message(message, limit-12))
             blocks = 0
@@ -110,7 +106,7 @@ class Bot(discord.Client):
             if send_next or files:
                 last_msg = await channel.send(send_next, files=files)
 
-        elif message.strip():
+        elif message and message.strip():
             # Simple case
             parts = split_message(message, limit)
             for part in parts[:-1]:
@@ -126,56 +122,11 @@ class Bot(discord.Client):
 
         return last_msg
 
-    async def send_message_with_action_results(self, channel, message, *, actions_taken=[], futures=[]):
-        file_futures = []
-        exceptions = []
-
-        for fut in asyncio.as_completed(futures):
-            try:
-                results = await fut
-                if isinstance(results, Attachment) or isinstance(results, str):
-                    results = [results]
-
-                for result in results:
-                    if isinstance(result, Attachment):
-                        file_futures.append(asyncio.create_task(make_discord_file(result)))
-                    elif isinstance(result, str):
-                        actions_taken.append(result)
-
-            except Exception as exc:
-                exceptions.append(exc)
-
-        files = []
-        if file_futures:
-            for fut in asyncio.as_completed(file_futures):
-                try:
-                    files.append(await fut)
-                except Exception as exc:
-                    exceptions.append(exc)
-
-        # Add a log of actions taken in small text
-        if actions_taken:
-            message = '\n-# '.join([message or ''] + actions_taken)
-
-        await self.send_message(channel, message, files=files)
-
-        # Let the AI know about the exceptions.
-        if exceptions:
-            if len(files) == 1:
-                text = f'SYSTEM: 1 attachment successfully sent to user, but the following encountered errors:'
-            elif len(files) > 1:
-                text = f'SYSTEM: {len(files)} attachments successfully sent to user, but the following encountered errors:'
-            else:
-                text = f'SYSTEM: Sent message without attachments due to the following errors:'
-
-            for exception in exceptions:
-                msg = str(getattr(exception, 'message', None) or exception)
-                text += f'\n{msg}'
-
-            asyncio.create_task(self.respond(text))
-
     async def respond(self, content, message=None, attachments=[]):
         """Respond to input from the user or the system."""
+
+        if not self.__ready.done():
+            await self.__ready
 
         timestamp = message.created_at if message else datetime.now(tz=timezone.utc)
         timestamp_str = timestamp.astimezone(self.assistant.timezone).strftime("%H:%M:%S")
@@ -206,110 +157,81 @@ class Bot(discord.Client):
 
         response_time = datetime.now(tz=timezone.utc)
 
-        futures = []
-        action_futures = []
-        actions_taken = []
+        # Keep track of all the tasks we spawn, so that we can await them and
+        # catch the exceptions at the end.
+        tasks = []
+        tasks.extend(self.assistant.run_actions(response))
+
+        log_future = None
         if self.log_channel:
             quoted_message = '\n> '.join(content.split('\n'))
             log_future = asyncio.create_task(
-                self.send_message(self.log_channel, f'> {quoted_message}\n\n{format_json_md(response)}'))
+                self.send_message(self.log_channel, f'> {quoted_message}\n\n{format_json_md(response.raw_data)}'))
+            tasks.append(log_future)
 
-        if 'bug_report' in response and self.bugs_channel:
+        if response.bug_report and self.bugs_channel:
             # This depends on the log future since it includes a jump link to
             # the log message
-            futures.append(self.write_bug_report(response['bug_report'], message, log_future=log_future))
-        elif self.log_channel:
-            futures.append(log_future)
+            tasks.append(asyncio.create_task(self.write_bug_report(response.bug_report, message, log_future=log_future)))
 
-        if 'prompt_after' in response:
+        if response.prompt_after is not None:
             # If there's an existing checkin task, cancel it
             if self.current_checkin_task and not self.current_checkin_task.done():
                 self.current_checkin_task.cancel()
 
-            self.current_checkin_task = asyncio.create_task(self.perform_checkin(response_time, response['prompt_after']))
+            self.current_checkin_task = asyncio.create_task(self.perform_checkin(response_time, response.prompt_after))
 
-        actions = set(self.__actions[key] for key in response if key in self.__actions)
-        for action in actions:
-            task = asyncio.create_task(action(**{key: response.get(key) for key in action._action_keys}))
-            action_futures.append(task)
-
-        if 'long_term_goals_action' in response:
-            long_term_goal_action = response['long_term_goals_action']
-            long_term_goal_text = response['long_term_goals_text']
-            # Check if long_term_goal_text is a string, or a list of strings:
-            long_term_goal_text_list = [long_term_goal_text] if isinstance(long_term_goal_text, str) else long_term_goal_text
-            futures.append(self.update_long_term_goals(long_term_goal_action, long_term_goal_text_list))
-            actions_taken.append(f'Modifying long term goals')
-
-        if response.get('timed_reminder_time'):
-            # Set up a timed reminder
-            # Parse the time as a datetime:
-            reminder_time = datetime.fromisoformat(response['timed_reminder_time'])
-            # Make the reminder time local to UTC
-            if not reminder_time.tzinfo and self.assistant.timezone is not None:
-                reminder_time = reminder_time.replace(tzinfo=self.assistant.timezone)
-            reminder_time = reminder_time.astimezone(timezone.utc)
-            reminder_text = response['timed_reminder_text']
-            repeat = response.get('timed_reminder_repeat', False)
-            repeat_interval = response.get('timed_reminder_repeat_interval', 'day')
-
-            reminder = Reminder(reminder_time, reminder_text, repeat, repeat_interval)
-            futures.append(self.add_timed_reminder(reminder))
-
-            timestamp = int(reminder_time.timestamp())
-            rel_date = None
-            if reminder_time.date() == date.today():
-                rel_date = 'today'
-            elif reminder_time.date() == date.today() + timedelta(days=1):
-                rel_date = 'tomorrow'
-            else:
-                rel_date = f'<t:{timestamp}:R>'
-            if repeat and repeat_interval == 'day':
-                actions_taken.append(f'Added daily reminder at <t:{timestamp}:t> starting {rel_date}')
-            elif repeat:
-                actions_taken.append(f'Added {repeat_interval}ly reminder starting {rel_date}')
-            elif rel_date == 'today':
-                actions_taken.append(f'Added reminder going off <t:{timestamp}:R>')
-            else:
-                actions_taken.append(f'Added reminder going off {rel_date} at <t:{timestamp}:t>')
-
-        chat = response.get('chat') or ''
-        reactions = response.get('react')
+        if message:
+            for emoji in response.reactions:
+                tasks.append(asyncio.create_task(message.add_reaction(emoji)))
 
         if self.chat_channel:
-            # If there's no chat message and there's no user message to react
-            # to OR we want to report on actions taken, the reacts become the
-            # chat message
-            if reactions and not chat and (not message or actions_taken):
-                chat = reactions
-                reactions = None
+            # Convert all attachments into Discord files
+            files = []
+            async for attachment, data in response.read_attachments():
+                filename = urlparse(attachment.url).path.replace('\\', '/').rsplit('/', 1)[-1]
+                files.append(discord.File(BytesIO(data), filename))
 
-            if chat or action_futures:
-                futures.insert(0, self.send_message_with_action_results(self.chat_channel, chat, actions_taken=actions_taken, futures=action_futures))
+            # Wait for all actions to be done, as they may alter the response
+            await response.wait_for_actions()
 
-        if message and reactions:
-            for emoji in split_emoji(reactions):
-                futures.insert(0, message.add_reaction(emoji))
+            # If there's no chat message and there's no user message to react to
+            # then the react becomes the chat message
+            chat = response.chat
+            if not chat and response.reactions and not message:
+                chat = ''.join(response.reactions)
 
-        if futures:
-            results = await asyncio.gather(*futures, return_exceptions=True)
+            # Add a log of actions taken in small text
+            if response.actions_taken:
+                chat = '\n-# '.join([chat or ''] + response.actions_taken)
 
-            # Check exceptions and report them
-            exc = None
-            for result in results:
-                if isinstance(result, Exception):
-                    exc = result
-                    trace = ''.join(traceback.format_exception(exc)).rstrip()
-                    # Hack to insert zero-width spaces
-                    trace = trace.replace('```', '`​`​`')
-                    report = f'```python\n{trace}\n```'
-                    asyncio.create_task(self.write_bug_report(report, message, log_future=log_future))
+            if chat or files:
+                tasks.insert(0, self.send_message(self.chat_channel, chat, files=files))
 
-            # Re-raise so it shows up properly in the log
-            if exc:
-                raise exc
+        # Check exceptions and report them.  This includes any exceptions from
+        # the action tasks, which were ignored earlier.
+        gatherer = asyncio.gather(*tasks, return_exceptions=True)
+
+        exc = None
+        for result in await gatherer:
+            if isinstance(result, Exception):
+                await self.write_bug_report(result, message=message, log_future=log_future)
+
+        # Re-raise so it shows up properly in the log
+        if exc:
+            raise exc
 
     async def write_bug_report(self, report, message=None, log_future=None):
+        await self.__ready
+        if not self.bugs_channel:
+            return
+
+        if isinstance(report, BaseException):
+            trace = ''.join(traceback.format_exception(report)).rstrip()
+            # Hack to insert zero-width spaces
+            trace = trace.replace('```', '`​`​`')
+            report = f'```python\n{trace}\n```'
+
         # Disobedience proofing
         if not isinstance(report, str):
             report = format_json_md(report)
@@ -321,44 +243,6 @@ class Bot(discord.Client):
             report = f' - [User message]({message.jump_url})\n{report}'
 
         await self.send_message(self.bugs_channel, report)
-
-    async def add_timed_reminder(self, reminder):
-        if not self.assistant.reminders.add_reminder(reminder):
-            # Already existed
-            return
-
-        # If the reminder is for later today, set up a task to send it
-        if reminder.time < self.session.get_next_rollover():
-            asyncio.create_task(self.send_reminder(reminder))
-
-        # Update the pinned reminders message
-        if self.chat_channel:
-            await self.reminders_message.update()
-
-    async def get_reminders_message(self):
-        return self.assistant.reminders.as_markdown(self.assistant.timezone)
-
-    async def update_long_term_goals(self, long_term_goal_action, long_term_goal_text_list):
-        # Get the list of existing long term goals, if any:
-        with self.assistant.open_memory_file('long_term_goals.json', default='{}') as fh:
-            long_term_goals_json = fh.read()
-        long_term_goals_dict = json.loads(long_term_goals_json)
-
-        if long_term_goal_action == 'add':
-            for long_term_goal_text in long_term_goal_text_list:
-                long_term_goals_dict[long_term_goal_text] = True
-
-        elif long_term_goal_action == 'remove':
-            for long_term_goal_text in long_term_goal_text_list:
-                if long_term_goal_text in long_term_goals_dict:
-                    del long_term_goals_dict[long_term_goal_text]
-
-        else:
-            return
-
-        # Write the dict back to file
-        with self.assistant.open_memory_file('long_term_goals.json', 'w') as fh:
-            fh.write(json.dumps(long_term_goals_dict))
 
     async def perform_checkin(self, last_activity, prompt_after):
         try:
@@ -379,37 +263,23 @@ class Bot(discord.Client):
 
             print(f'Checking in due to user inactivity for {prompt_after} minutes.')
             if prompt_after == 0:
-                await self.respond(f'(Immediately thereafter…)')
+                coro = self.respond(f'(Immediately thereafter…)')
             elif prompt_after == 1:
-                await self.respond(f'(One minute later…)')
+                coro = self.respond(f'(One minute later…)')
             else:
-                await self.respond(f'({prompt_after} minutes later…)')
+                coro = self.respond(f'({prompt_after} minutes later…)')
+
+            # Shield response from cancellation
+            await asyncio.shield(coro)
         except asyncio.CancelledError:
             print('Checkin task was cancelled')
             return
 
-    async def send_reminder(self, reminder: Reminder):
-        print(f'Setting reminder for {reminder.time}: {reminder.text}')
-
-        begin_time = datetime.now(tz=timezone.utc)
-        if reminder.time > begin_time:
-            await asyncio.sleep((reminder.time - begin_time).total_seconds())
-
-        await self.respond(f'SYSTEM: Reminder from your past self now going off: {reminder.text}')
-
-        # Remove the reminder from the list
-        self.assistant.reminders.remove_reminder(reminder.time, reminder.text)
-
-        # If the reminder repeats, set up a new reminder for the next time (after 1 interval):
-        if reminder.repeat:
-            new_time = reminder.time + reminder.repeat_delta
-            while new_time < begin_time:
-                new_time += reminder.repeat_delta
-
-            self.assistant.reminders.add_reminder(Reminder(new_time, reminder.text, repeat=True, repeat_interval=reminder.repeat_interval))
-
     async def on_ready(self):
         print(f'{self.user} has connected to Discord!')
+
+        if not self.__ready.done():
+            self.__ready.set_result(None)
 
         # Reset these if necessary
         for pin in self.__pinned_messages:
@@ -452,9 +322,6 @@ class Bot(discord.Client):
                         if not message.pinned:
                             pin_messages.append(message)
                         break
-
-                if content.startswith('## Current Reminders\n'):
-                    self.reminder_list_message = pin
 
             for pin in self.__pinned_messages:
                 if not pin._discord_message:
@@ -583,32 +450,27 @@ class Bot(discord.Client):
 
             self.session = await self.assistant.load_session(date, old_session)
 
-            for prompt in await asyncio.gather(*self.call_hooks('system_prompt')):
-                self.session.standard_format_prompt += '\n' + prompt.strip()
-
             if self.log_channel:
                 futures.append(self.send_message(self.log_channel, self.session.initial_system_prompt))
 
-            futures += self.call_hooks('post_session_end', old_session)
+            futures += self.assistant.call_hooks('session_load', self.session)
+            futures += self.assistant.call_hooks('post_session_end', old_session)
             futures.append(self.change_presence(status=discord.Status.online))
-
-            # Schedule next day's reminders
-            next_rollover = self.session.get_next_rollover()
-            for reminder in self.assistant.reminders.get_reminders_before(next_rollover):
-                asyncio.create_task(self.send_reminder(reminder))
 
         if self.log_channel:
             futures.append(self.log_channel.send(f'Finished rollover to day {date}'))
-
-        if self.chat_channel:
-            futures.append(self.reminders_message.update())
 
         if futures:
             await asyncio.gather(*futures)
 
     async def setup_hook(self):
-        for prompt in await asyncio.gather(*self.call_hooks('system_prompt')):
-            self.session.standard_format_prompt += '\n' + prompt.strip()
+        self.__ready = asyncio.Future()
+
+        for plugin in self.assistant.plugins.values():
+            plugin._init_bot(self)
+
+            for func in plugin._discord_commands:
+                self._register_command(func)
 
         self.rollover_lock = asyncio.Lock()
 
@@ -617,21 +479,14 @@ class Bot(discord.Client):
         self.check_rollover.change_interval(time=rollover_time)
         self.check_rollover.start()
 
-        next_rollover = self.session.get_next_rollover()
-        for reminder in self.assistant.reminders.get_reminders_before(next_rollover):
-            asyncio.create_task(self.send_reminder(reminder))
-
-        self.reminders_message = PinnedMessage(self.get_reminders_message,
-                                               header='## Current Reminders',
-                                               discord_view=views.ReminderListView(self))
-        self.__pinned_messages.append(self.reminders_message)
-        self.add_view(self.reminders_message._discord_view)
-
-        for plugin in self.plugins.values():
+        for plugin in self.assistant.plugins.values():
             for pin in plugin._pinned_messages:
                 view = pin._init_discord_view(plugin=plugin, bot=self)
                 if view is not None:
                     self.add_view(view)
+                self.__pinned_messages.append(pin)
+
+        await asyncio.gather(*self.assistant.call_hooks('session_load', self.session))
 
         # Check when the next check-in should be
         message = self.session.get_last_assistant_message()
@@ -644,20 +499,3 @@ class Bot(discord.Client):
             if 'prompt_after' in response:
                 self.current_checkin_task = asyncio.create_task(
                     self.perform_checkin(message.timestamp or self.session.last_activity, response['prompt_after']))
-
-    def load_plugin(self, name, config):
-        plugin = Plugin.load(name, self, config)
-        self.plugins[name] = plugin
-        for name, hook in plugin._hooks.items():
-            self.__hooks[name].append(hook)
-
-        for pinned_msg in plugin._pinned_messages:
-            self.__pinned_messages.append(pinned_msg)
-
-        for key, func in plugin._actions.items():
-            self.__actions[key] = func
-
-    def call_hooks(self, name, *args, **kwargs):
-        for hooks in self.__hooks[name]:
-            for hook in hooks:
-                yield hook(*args, **kwargs)

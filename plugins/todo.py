@@ -2,7 +2,7 @@ import discord
 import json
 import asyncio
 
-from lib.plugin import Plugin, hook, action, pinned_message
+from lib.plugin import Plugin, hook, action, pinned_message, system_prompt
 from lib.msgtypes import UserMessage
 
 
@@ -28,8 +28,8 @@ class TodoListView(discord.ui.View):
 class TodoPlugin(Plugin):
     """Allows the assistant to keep track of a list of TODO items."""
 
-    @hook('system_prompt')
-    async def on_system_prompt(self):
+    @system_prompt
+    def on_static_system_prompt(self, session):
         return (
             'It may optionally contain a key "todo_action" and "todo_text", '
             'which will be used to add or remove an item from today\'s todo '
@@ -38,6 +38,16 @@ class TodoPlugin(Plugin):
             'multiple items at once. The todo_action should either be "add" or '
             '"remove".'
         )
+
+    @system_prompt(dynamic=True)
+    def on_dynamic_system_prompt(self, session):
+        with self.assistant.open_memory_file('todo.json') as fh:
+            todo_json = fh.read()
+        todo_dict = json.loads(todo_json)
+        todo_string = "# Current TODO List:\n"
+        for todo_text in todo_dict:
+            todo_string += f"- {todo_text}\n"
+        return todo_string.rstrip()
 
     @pinned_message(header='## Current TODOs', discord_view=TodoListView)
     async def todo_list_message(self):
@@ -48,7 +58,7 @@ class TodoPlugin(Plugin):
         return ' - ' + '\n - '.join(todos_list)
 
     @action('todo_action', 'todo_text')
-    async def on_todo_action(self, *, todo_action=None, todo_text=None):
+    async def on_todo_action(self, response, *, todo_action=None, todo_text=None):
         if not todo_text or todo_action not in ('add', 'remove'):
             return
 
@@ -126,7 +136,6 @@ class EditTodosModal(discord.ui.Modal, title='Edit Todos'):
         self.bot = bot
         with self.bot.assistant.open_memory_file('todo.json', 'r', default='[]') as fh:
             self.items.default = '\n'.join(json.load(fh))
-            print(self.items.default)
 
     async def on_submit(self, interaction: discord.Interaction):
         value = self.items.value.strip().split('\n')

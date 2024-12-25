@@ -2,13 +2,14 @@ import pathlib
 import json
 import sys, os
 import asyncio
+from collections import defaultdict
 from datetime import datetime, time, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 from . import models
 from .session import Session
-from .reminders import Reminders
 from .msgtypes import parse_message
+from .plugin import Plugin
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -31,8 +32,10 @@ class Assistant:
         self.unsummarised_messages = 1000
         self.timezone = None
         self.rollover = None
-        self.reminders = Reminders()
-        self.plugin_config = {}
+
+        self.plugins = {}
+        self.__hooks = defaultdict(list)
+        self.__actions = {}
 
     def get_today(self):
         "Returns the current date, respecting the configured rollover."
@@ -83,11 +86,41 @@ class Assistant:
         ass.summarisation_threshold = data.get('summarisation_threshold')
         ass.unsummarised_messages = data.get('unsummarised_messages', 1000)
 
-        # Load reminders from file
-        ass.reminders.load(ass.open_memory_file('reminders.json', default='[]'))
+        for plugin, config in data.get('plugins', {}).items():
+            if config.get('enabled'):
+                ass.load_plugin(plugin, config)
 
-        ass.plugin_config = data.get('plugins', {})
         return ass
+
+    def load_plugin(self, name, config):
+        if name in self.plugins:
+            plugin = self.plugins[name]
+        else:
+            plugin = Plugin.load(name, self)
+            self.plugins[name] = plugin
+
+            for name, hook in plugin._hooks.items():
+                self.__hooks[name].append(hook)
+
+            for key, func in plugin._actions.items():
+                self.__actions[key] = func
+
+        for hook in plugin._get_hooks('configure'):
+            asyncio.run(hook(config))
+
+        return plugin
+
+    def call_hooks(self, name, *args, **kwargs):
+        for hooks in self.__hooks[name]:
+            for hook in hooks:
+                yield hook(*args, **kwargs)
+
+    def run_actions(self, response):
+        tasks = []
+        actions = set(self.__actions[key] for key in response.raw_data if key in self.__actions)
+        for action in actions:
+            tasks.append(response.run_action(action))
+        return tasks
 
     def open_memory_file(self, suffix, mode='r', default=''):
         path = MEMORY_DIR / f'{self.id}-{suffix}'

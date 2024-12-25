@@ -1,7 +1,7 @@
 import asyncio
 from openai import AsyncOpenAI
 
-from lib.plugin import Plugin, hook, action
+from lib.plugin import Plugin, hook, action, system_prompt
 from lib.msgtypes import Attachment
 from lib import models
 
@@ -18,8 +18,8 @@ class DallEPlugin(Plugin):
         else:
             self.client = AsyncOpenAI()
 
-    @hook('system_prompt')
-    async def on_system_prompt(self):
+    @system_prompt
+    def on_system_prompt(self, session):
         text = 'If it is necessary to show the user an image, you MAY include ' \
                'a key called "images", containing a list of JSON objects each ' \
                'describing an image to be generated.'
@@ -28,9 +28,9 @@ class DallEPlugin(Plugin):
             return f'{text} The image model is DALL·E 2, which requires a ' \
                '"prompt" string describing the desired ' \
                'image in exquisite detail, a "size" string with the desired ' \
-               'size which MUST be one of "256x256", "512x512" or "1024x1024", ' \
+               'size which MUST be one of "256x256", "512x512" or "1024x1024" ' \
                '(if the user explicitly specifies a different size, choose the ' \
-               'closest size and inform them)'
+               'closest size and inform them).'
 
         elif self.model_name == 'dall-e-3':
             return f'{text} The image model is DALL·E 3, which requires a ' \
@@ -48,8 +48,9 @@ class DallEPlugin(Plugin):
             return f'Image generation DOES NOT WORK! Let them know that the configuration specifies the invalid model "{self.model_name}".'
 
     @action('images')
-    async def on_generate_images(self, *, images=[]):
-        return await asyncio.gather(*(self.generate_image(**image) for image in images))
+    async def on_generate_images(self, response, *, images=[]):
+        for fut in asyncio.as_completed(self.generate_image(**image) for image in images):
+            response.attach(await fut)
 
     async def generate_image(self, prompt: str, size: str, quality: str = "standard", style: str = "natural"):
         response = await self.client.images.generate(

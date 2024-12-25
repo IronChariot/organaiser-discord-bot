@@ -18,6 +18,9 @@ enabled = true
 [plugins.todo]
 enabled = true
 
+[plugins.reminders]
+enabled = true
+
 [plugins.dalle]
 enabled = true
 model = "dall-e-3"
