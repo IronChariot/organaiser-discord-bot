@@ -451,14 +451,8 @@ class Bot(discord.Client):
             new_messages = [self.make_user_message(f'SYSTEM: The following messages were sent while you were offline:')]
 
             for message in missed_messages:
-                timestamp = message.created_at.astimezone(self.assistant.timezone).strftime("%H:%M:%S")
-                content = f'[{timestamp}] {message.author.display_name}: {message.content}'
-
-                message = UserMessage(content, id=message.id, timestamp=message.created_at)
-                for attach in message.attachments:
-                    message.attach(attach.url, attach.content_type)
-
-                new_messages.append(message)
+                content = f'{message.author.display_name}: {message.content}'
+                new_messages.append(self.make_user_message(content, message, message.attachments))
 
             new_messages.append(self.make_user_message('SYSTEM: End of missed messages.'))
             await self.session.push_messages(new_messages)
