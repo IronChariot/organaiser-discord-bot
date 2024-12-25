@@ -11,7 +11,7 @@ from collections import defaultdict
 from functools import wraps
 
 from .util import split_message, format_json_md
-from .msgtypes import UserMessage, Attachment, Channel
+from .msgtypes import UserMessage, Attachment, Channel, Role
 from . import views
 
 # Max chars Discord allows to be sent per message
@@ -42,7 +42,6 @@ class Bot(discord.Client):
         self.diary_channel = None
         self.query_channel = None
         self.bugs_channel = None
-        self.current_checkin_task = None
 
         intents = discord.Intents.default()
         intents.message_content = True
@@ -51,6 +50,8 @@ class Bot(discord.Client):
 
         self.tree = app_commands.CommandTree(self)
         self.__pinned_messages = []
+
+        self.response_loop_task = None
 
     def _register_command(self, func):
         args, kwargs = func._discord_command
@@ -74,6 +75,222 @@ class Bot(discord.Client):
             return self.query_channel
         elif channel == Channel.BUGS:
             return self.bugs_channel
+
+    async def response_loop_wrapper(self):
+        """Catches any exceptions happening in the response loop and restarts
+        it as necessary."""
+
+        while True:
+            try:
+                await self.response_loop()
+            except Exception as ex:
+                try:
+                    print("Response loop aborted with exception!")
+                    traceback.print_exc()
+                    await self.write_bug_report(ex)
+                except:
+                    pass
+
+            await asyncio.sleep(10)
+
+    async def response_loop(self):
+        """Runs forever to check for new user messages and prompts the assistant
+        to respond to them."""
+
+        if not self.__ready.done():
+            await self.__ready
+
+        print("Starting response loop.")
+
+        # Check when the next check-in should be
+        prompt_after = 10
+        message = self.session.get_last_assistant_message()
+        if message and message.timestamp:
+            try:
+                response = message.parse_json()
+            except json.JSONDecodeError:
+                response = {}
+
+            if isinstance(response, dict) and isinstance(response.get('prompt_after'), (float, int)):
+                prompt_after = int(response['prompt_after'])
+                deadline = message.timestamp + timedelta(minutes=prompt_after)
+
+        while True:
+            # Wait for a new user message, or the prompt_after to time out
+            cur_time = datetime.now(tz=timezone.utc)
+            seconds_left = (deadline - cur_time).total_seconds()
+            if deadline < cur_time:
+                print("Next check-in OVERDUE by", cur_time - deadline)
+            else:
+                print("Next check-in at", deadline)
+                try:
+                    if self.session.last_message.role != Role.USER:
+                        await asyncio.wait_for(self.session.new_user_message, timeout=seconds_left)
+
+                    # If we got one, wait a bit for inactivity
+                    delay = self.assistant.response_delay
+                    if delay > 0:
+                        while True:
+                            await asyncio.wait_for(self.session.new_user_message, timeout=delay)
+
+                except asyncio.TimeoutError:
+                    pass
+
+            last_message = self.session.last_message
+            if last_message.role != Role.USER:
+                # There's no user message to respond to, we have to generate
+                # one, presumably we just woke up due to the prompt_after
+                cur_time = datetime.now(tz=timezone.utc)
+                if cur_time < deadline:
+                    # What?  Apparently not?
+                    print(f"Woke up spuriously with {deadline - cur_time} to go.")
+                    continue
+
+                if last_message.timestamp:
+                    elapsed = int(round((cur_time - last_message.timestamp).total_seconds() / 60))
+                else:
+                    elapsed = int(prompt_after)
+
+                print(f'Checking in due to user inactivity for {elapsed} minutes.')
+                if elapsed == 0:
+                    self.session.append_message(self.make_user_message(f'(Immediately thereafter…)'))
+                elif elapsed == 1:
+                    self.session.append_message(self.make_user_message(f'(One minute later…)'))
+                else:
+                    self.session.append_message(self.make_user_message(f'({elapsed} minutes later…)'))
+
+            try:
+                async with self.chat_channel.typing():
+                    response = await self.prompt_response()
+
+                if response is not None and response.prompt_after is not None:
+                    prompt_after = response.prompt_after
+                else:
+                    prompt_after = 10
+                deadline = self.session.last_message.timestamp + timedelta(minutes=prompt_after)
+
+            except Exception as ex:
+                await self.write_bug_report(ex)
+
+    async def prompt_response(self):
+        """Prompts a response from the assistant and handles it."""
+
+        if not self.__ready.done():
+            await self.__ready
+
+        while True:
+            try:
+                response = await self.session.query_assistant_response()
+                break
+            except ValueError as ex:
+                channel = self.chat_channel or self.log_channel
+                if channel is None:
+                    raise
+                view = views.RetryButton()
+                err_msg = await channel.send(f'⚠️ **Error**: {ex}', view=view)
+                await view.wait()
+                try:
+                    await err_msg.delete()
+                except:
+                    pass
+                if not view.retry:
+                    return
+
+        if not response:
+            return
+
+        # Find the corresponding user message.
+        message = None
+        if response.user_message and response.user_message.id:
+            try:
+                message = await self.chat_channel.fetch_message(response.user_message.id)
+            except:
+                message = None
+
+        response_time = datetime.now(tz=timezone.utc)
+
+        # Keep track of all the tasks we spawn, so that we can await them and
+        # catch the exceptions at the end.
+        tasks = []
+        tasks.extend(self.assistant.run_actions(response))
+
+        log_future = None
+        if self.log_channel:
+            log_message = format_json_md(response.raw_data)
+
+            if response.user_message and response.user_message.content:
+                quoted_message = '\n> '.join(response.user_message.content.split('\n'))
+                log_message = f'> {quoted_message}\n\n{log_message}'
+
+            log_future = asyncio.create_task(
+                self.send_message(self.log_channel, log_message))
+            tasks.append(log_future)
+
+        if response.bug_report and self.bugs_channel:
+            # This depends on the log future since it includes a jump link to
+            # the log message
+            tasks.append(asyncio.create_task(self.write_bug_report(response.bug_report, message, log_future=log_future)))
+
+        if message:
+            for emoji in response.reactions:
+                tasks.append(asyncio.create_task(message.add_reaction(emoji)))
+
+        if self.chat_channel:
+            # Convert all attachments into Discord files
+            files = []
+            async for attachment, data in response.read_attachments():
+                filename = urlparse(attachment.url).path.replace('\\', '/').rsplit('/', 1)[-1]
+                files.append(discord.File(BytesIO(data), filename))
+
+            # Wait for all actions to be done, as they may alter the response
+            await response.wait_for_actions()
+
+            # If there's no chat message and there's no user message to react to
+            # then the react becomes the chat message
+            chat = response.chat
+            if not chat and response.reactions and not message:
+                chat = ''.join(response.reactions)
+
+            # Add a log of actions taken in small text
+            if response.actions_taken:
+                chat = '\n-# '.join([chat or ''] + response.actions_taken)
+
+            if chat or files:
+                tasks.insert(0, self.send_message(self.chat_channel, chat, files=files))
+
+        # Check exceptions and report them.  This includes any exceptions from
+        # the action tasks, which were ignored earlier.
+        gatherer = asyncio.gather(*tasks, return_exceptions=True)
+
+        exc = None
+        for result in await gatherer:
+            if isinstance(result, Exception):
+                await self.write_bug_report(result, message=message, log_future=log_future)
+
+        return response
+
+    async def write_bug_report(self, report, message=None, log_future=None):
+        await self.__ready
+        if not self.bugs_channel:
+            return
+
+        if isinstance(report, BaseException):
+            trace = ''.join(traceback.format_exception(report)).rstrip()
+            # Hack to insert zero-width spaces
+            trace = trace.replace('```', '`​`​`')
+            report = f'```python\n{trace}\n```'
+
+        # Disobedience proofing
+        if not isinstance(report, str):
+            report = format_json_md(report)
+
+        if log_future:
+            log_message = await log_future
+            report = f' - [Raw AI response]({log_message.jump_url})\n{report}'
+        if message:
+            report = f' - [User message]({message.jump_url})\n{report}'
+
+        await self.send_message(self.bugs_channel, report)
 
     async def send_message(self, channel, message, files=[]):
         limit = MESSAGE_LIMIT
@@ -122,158 +339,17 @@ class Bot(discord.Client):
 
         return last_msg
 
-    async def respond(self, content, message=None, attachments=[]):
-        """Respond to input from the user or the system."""
-
-        if not self.__ready.done():
-            await self.__ready
-
+    def make_user_message(self, content, message=None, attachments=[]):
         timestamp = message.created_at if message else datetime.now(tz=timezone.utc)
         timestamp_str = timestamp.astimezone(self.assistant.timezone).strftime("%H:%M:%S")
         content = f'[{timestamp_str}] {content}'
 
         message_id = message.id if message else None
+
         user_message = UserMessage(content, id=message_id, timestamp=timestamp)
         for attach in attachments:
             user_message.attach(attach.url, attach.content_type)
-
-        retry = True
-        while retry:
-            try:
-                response = await self.session.chat(user_message)
-                retry = False
-            except ValueError as ex:
-                channel = message.channel if message else (self.chat_channel or self.log_channel)
-                view = views.RetryButton()
-                err_msg = await channel.send(f'⚠️ **Error**: {ex}', view=view)
-                await view.wait()
-                retry = view.retry
-                try:
-                    await err_msg.delete()
-                except:
-                    pass
-                if not retry:
-                    return
-
-        response_time = datetime.now(tz=timezone.utc)
-
-        # Keep track of all the tasks we spawn, so that we can await them and
-        # catch the exceptions at the end.
-        tasks = []
-        tasks.extend(self.assistant.run_actions(response))
-
-        log_future = None
-        if self.log_channel:
-            quoted_message = '\n> '.join(content.split('\n'))
-            log_future = asyncio.create_task(
-                self.send_message(self.log_channel, f'> {quoted_message}\n\n{format_json_md(response.raw_data)}'))
-            tasks.append(log_future)
-
-        if response.bug_report and self.bugs_channel:
-            # This depends on the log future since it includes a jump link to
-            # the log message
-            tasks.append(asyncio.create_task(self.write_bug_report(response.bug_report, message, log_future=log_future)))
-
-        if response.prompt_after is not None:
-            # If there's an existing checkin task, cancel it
-            if self.current_checkin_task and not self.current_checkin_task.done():
-                self.current_checkin_task.cancel()
-
-            self.current_checkin_task = asyncio.create_task(self.perform_checkin(response_time, response.prompt_after))
-
-        if message:
-            for emoji in response.reactions:
-                tasks.append(asyncio.create_task(message.add_reaction(emoji)))
-
-        if self.chat_channel:
-            # Convert all attachments into Discord files
-            files = []
-            async for attachment, data in response.read_attachments():
-                filename = urlparse(attachment.url).path.replace('\\', '/').rsplit('/', 1)[-1]
-                files.append(discord.File(BytesIO(data), filename))
-
-            # Wait for all actions to be done, as they may alter the response
-            await response.wait_for_actions()
-
-            # If there's no chat message and there's no user message to react to
-            # then the react becomes the chat message
-            chat = response.chat
-            if not chat and response.reactions and not message:
-                chat = ''.join(response.reactions)
-
-            # Add a log of actions taken in small text
-            if response.actions_taken:
-                chat = '\n-# '.join([chat or ''] + response.actions_taken)
-
-            if chat or files:
-                tasks.insert(0, self.send_message(self.chat_channel, chat, files=files))
-
-        # Check exceptions and report them.  This includes any exceptions from
-        # the action tasks, which were ignored earlier.
-        gatherer = asyncio.gather(*tasks, return_exceptions=True)
-
-        exc = None
-        for result in await gatherer:
-            if isinstance(result, Exception):
-                await self.write_bug_report(result, message=message, log_future=log_future)
-
-        # Re-raise so it shows up properly in the log
-        if exc:
-            raise exc
-
-    async def write_bug_report(self, report, message=None, log_future=None):
-        await self.__ready
-        if not self.bugs_channel:
-            return
-
-        if isinstance(report, BaseException):
-            trace = ''.join(traceback.format_exception(report)).rstrip()
-            # Hack to insert zero-width spaces
-            trace = trace.replace('```', '`​`​`')
-            report = f'```python\n{trace}\n```'
-
-        # Disobedience proofing
-        if not isinstance(report, str):
-            report = format_json_md(report)
-
-        if log_future:
-            log_message = await log_future
-            report = f' - [Raw AI response]({log_message.jump_url})\n{report}'
-        if message:
-            report = f' - [User message]({message.jump_url})\n{report}'
-
-        await self.send_message(self.bugs_channel, report)
-
-    async def perform_checkin(self, last_activity, prompt_after):
-        try:
-            deadline = last_activity + timedelta(minutes=prompt_after)
-            cur_time = datetime.now(tz=timezone.utc)
-            if deadline < cur_time:
-                print("Next check-in OVERDUE by", cur_time - deadline)
-            else:
-                print("Next check-in at", deadline)
-
-            while deadline > cur_time:
-                seconds_left = (deadline - cur_time).total_seconds()
-                await asyncio.sleep(min(3600, seconds_left))
-                cur_time = datetime.now(tz=timezone.utc)
-
-            # Unassign this otherwise respond() will cancel us
-            self.current_checkin_task = None
-
-            print(f'Checking in due to user inactivity for {prompt_after} minutes.')
-            if prompt_after == 0:
-                coro = self.respond(f'(Immediately thereafter…)')
-            elif prompt_after == 1:
-                coro = self.respond(f'(One minute later…)')
-            else:
-                coro = self.respond(f'({prompt_after} minutes later…)')
-
-            # Shield response from cancellation
-            await asyncio.shield(coro)
-        except asyncio.CancelledError:
-            print('Checkin task was cancelled')
-            return
+        return user_message
 
     async def on_ready(self):
         print(f'{self.user} has connected to Discord!')
@@ -341,6 +417,10 @@ class Bot(discord.Client):
         # Check if any messages came in while we were down
         await self.check_downtime_messages()
 
+        # Run the response loop in the background.
+        if not self.response_loop_task or self.response_loop_task.done():
+            self.response_loop_task = asyncio.create_task(self.response_loop_wrapper())
+
         if sync_task:
             await sync_task
 
@@ -368,8 +448,7 @@ class Bot(discord.Client):
                 missed_messages.append(message)
 
         if missed_messages:
-            timestamp = datetime.now(tz=self.assistant.timezone).strftime("%H:%M:%S")
-            self.session.append_message(UserMessage(f'[{timestamp}] SYSTEM: The following messages were sent while you were offline:'))
+            new_messages = [self.make_user_message(f'SYSTEM: The following messages were sent while you were offline:')]
 
             for message in missed_messages:
                 timestamp = message.created_at.astimezone(self.assistant.timezone).strftime("%H:%M:%S")
@@ -379,9 +458,10 @@ class Bot(discord.Client):
                 for attach in message.attachments:
                     message.attach(attach.url, attach.content_type)
 
-                self.session.append_message(message)
+                new_messages.append(message)
 
-            await self.respond('SYSTEM: End of missed messages.')
+            new_messages.append(self.make_user_message('SYSTEM: End of missed messages.'))
+            self.session.append_messages(new_messages)
 
     async def on_message(self, message):
         if message.author == self.user:
@@ -391,8 +471,8 @@ class Bot(discord.Client):
             return
 
         if message.channel == self.chat_channel:
-            async with message.channel.typing():
-                await self.respond(f'{message.author.display_name}: {message.content}', message, message.attachments)
+            msg = self.make_user_message(f'{message.author.display_name}: {message.content}', message, message.attachments)
+            self.session.append_message(msg)
 
         if message.channel == self.query_channel:
             async with message.channel.typing():
@@ -405,7 +485,7 @@ class Bot(discord.Client):
                 except ValueError as ex:
                     reply = f'⚠️ **Error**: {ex}'
 
-                await self.send_message(self.query_channel, reply)
+            await self.send_message(self.query_channel, reply)
 
     async def on_raw_message_edit(self, payload):
         message = self.session.find_message(payload.message_id)
@@ -487,15 +567,3 @@ class Bot(discord.Client):
                 self.__pinned_messages.append(pin)
 
         await asyncio.gather(*self.assistant.call_hooks('session_load', self.session))
-
-        # Check when the next check-in should be
-        message = self.session.get_last_assistant_message()
-        if message:
-            try:
-                response = message.parse_json()
-            except json.JSONDecodeError:
-                return
-
-            if 'prompt_after' in response:
-                self.current_checkin_task = asyncio.create_task(
-                    self.perform_checkin(message.timestamp or self.session.last_activity, response['prompt_after']))

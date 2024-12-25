@@ -1,4 +1,5 @@
 import json
+import asyncio
 
 EMOJI_MODIFIERS = '\ufe0f\ufe0e\U0001f3fb\U0001f3fc\U0001f3fd\U0001f3fe\U0001f3ff' \
                 +  ''.join(chr(i) for i in range(0xe0020, 0xe0080))
@@ -81,3 +82,27 @@ def split_emoji(string):
 def format_json_md(data):
     code = json.dumps(data, indent=4).replace('```', '\\u0060\\u0060\\u0060')
     return f'```json\n{code}\n```'
+
+
+class Condition:
+    """Cheap async condition variable."""
+
+    _future = None
+
+    def notify_all(self):
+        old_fut = self._future
+        self._future = None
+        if old_fut is not None:
+            old_fut.set_result(None)
+
+    def wait(self):
+        fut = self._future
+        if not fut:
+            fut = asyncio.Future()
+            self._future = fut
+
+        # Cancelling the return value shouldn't cause others to wake up
+        return asyncio.shield(fut)
+
+    def __await__(self):
+        return self.wait().__await__()

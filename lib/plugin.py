@@ -113,14 +113,6 @@ class Plugin:
         self._scheduled_tasks.add(task)
         return task
 
-    async def respond(self, msg, attachments=[]):
-        bot = self._bot
-        if bot is None:
-            # Wait for the bot to be initialized
-            bot = await self._bot_future
-
-        await bot.respond(msg, attachments=attachments)
-
     def send_message(self, message, *, channel=Channel.CHAT):
         """If this Assistant is running in a Discord bot, sends a message to
         the specified channel, if that channel is configured.

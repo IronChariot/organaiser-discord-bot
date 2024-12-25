@@ -32,6 +32,7 @@ class Assistant:
         self.unsummarised_messages = 1000
         self.timezone = None
         self.rollover = None
+        self.response_delay = 1
 
         self.plugins = {}
         self.__hooks = defaultdict(list)
@@ -85,6 +86,7 @@ class Assistant:
         ass.discord_config = data.get('discord', {})
         ass.summarisation_threshold = data.get('summarisation_threshold')
         ass.unsummarised_messages = data.get('unsummarised_messages', 1000)
+        ass.response_delay = data.get('response_delay', 1)
 
         for plugin, config in data.get('plugins', {}).items():
             if config.get('enabled'):

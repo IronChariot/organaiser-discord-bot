@@ -1,10 +1,12 @@
 import json
 import pathlib
 import asyncio
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
+from typing import Optional
 
 from .response import AssistantResponse
 from .msgtypes import Role, Message, SystemMessage, UserMessage, AssistantMessage
+from .util import Condition
 
 # Format prompt comes from session_format_prompt.txt
 with open('session_format_prompt.txt', 'r') as f:
@@ -32,6 +34,8 @@ class Session:
             for prompt in plugin._static_system_prompts:
                 self.standard_format_prompt += '\n' + prompt(self)
 
+        self.new_user_message = Condition()
+
     def get_next_rollover(self):
         "Returns the datetime at which this session should end."
 
@@ -40,6 +44,10 @@ class Session:
             date += timedelta(days=1)
 
         return datetime.combine(date, self.assistant.rollover, tzinfo=self.assistant.timezone)
+
+    @property
+    def last_message(self):
+        return self.message_history[-1]
 
     def find_message(self, id):
         assert id is not None
@@ -63,11 +71,21 @@ class Session:
         self._rewrite_message_file()
 
     def append_message(self, message):
-        "Appends a message without invoing the model."
+        self.append_messages((message,))
 
-        self.message_history.append(message)
-        message.dump(self.messages_file)
+    def append_messages(self, messages):
+        """Appends messages to the message history.
+        Messages will be timestamped if they have not already been."""
+
+        self.message_history.extend(messages)
+        for message in messages:
+            if message.timestamp is None:
+                message.timestamp = datetime.now(tz=timezone.utc)
+            message.dump(self.messages_file)
         self.messages_file.flush()
+
+        if any(message.role == Role.USER for message in messages):
+            self.new_user_message.notify_all()
 
     def get_last_assistant_message(self):
         for message in self.message_history[::-1]:
@@ -170,10 +188,17 @@ class Session:
                 message.dump(self.messages_file)
             self.messages_file.flush()
 
-    async def chat(self, message: UserMessage):
-        "User or system sends a message.  Returns AI response (as JSON)."
+    async def chat(self, message: UserMessage) -> AssistantResponse:
+        """User or system sends a message.  Returns assistant response."""
 
         self.last_activity = datetime.now()
+
+        self.append_message(message)
+        return await self.query_assistant_response()
+
+    async def query_assistant_response(self) -> Optional[AssistantResponse]:
+        """Asks the assistant to respond to the current message history,
+        if there are any user messages to respond to, or None."""
 
         system_prompt = self.message_history[0].content + \
                         "\n\n" + \
@@ -184,26 +209,20 @@ class Session:
                 system_prompt += '\n\n' + prompt(self)
 
         async with self.context_lock:
+            if self.message_history[-1].role != Role.USER:
+                return
+
             # Check if we need to summarise before adding new message
             if self.should_summarise():
                 await self.create_summary()
 
-            self.message_history.append(message)
+            user_message = self.message_history[-1]
+            data = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
 
-            try:
-                data = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
-            except:
-                if self.message_history[-1] == message:
-                    self.message_history.pop()
-                raise
-
-            self.message_history[-2].dump(self.messages_file)
             self.message_history[-1].dump(self.messages_file)
             self.messages_file.flush()
 
-            response = AssistantResponse(self, data)
-
-        return response
+        return AssistantResponse(self, data, user_message)
 
     async def isolated_query(self, query, attachments=[], format_prompt=None, as_json=False):
         # Runs an isolated query on this session.

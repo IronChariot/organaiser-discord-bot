@@ -190,7 +190,7 @@ class RemindersPlugin(Plugin):
 
         begin_time = datetime.now(tz=timezone.utc)
         print(f'Responding to reminder for {reminder.time}: {reminder.text}')
-        await self.respond(f'SYSTEM: Reminder from your past self now going off: {reminder.text}')
+        session.append_message(UserMessage(f'SYSTEM: Reminder from your past self now going off: {reminder.text}'))
 
         # If the reminder repeats, set up a new reminder for the next time (after 1 interval):
         if reminder.repeat:

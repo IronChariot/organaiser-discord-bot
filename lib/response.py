@@ -1,13 +1,14 @@
 import asyncio
 
 from .msgtypes import Attachment
-from .util import split_emoji
+from .util import split_emoji, Condition
 
 
 class AssistantResponse:
-    def __init__(self, session, data):
+    def __init__(self, session, data, user_message=None):
         self.session = session
         self.raw_data = data
+        self.user_message = user_message
 
         self.chat = data.get('chat') or None
         self.reactions = list(split_emoji(data.get('react') or ''))
@@ -19,7 +20,7 @@ class AssistantResponse:
         self._pending_actions = set()
 
         self.__attachments = []
-        self.__attachment_waiter = None
+        self.__attachment_cond = Condition()
 
     def run_action(self, action):
         """Runs the given action on the response in the background.  Result may
@@ -56,9 +57,7 @@ class AssistantResponse:
         # Wake up any get_attachments consumers if this was the last task
         # to be finished.
         if not self._pending_actions:
-            waiter = self.__attachment_waiter
-            if waiter is not None:
-                waiter.set_result(None)
+            self.__attachment_cond.notify_all()
 
     async def wait_for_actions(self):
         """Waits for all actions to be done.  Ignores exceptions."""
@@ -75,22 +74,7 @@ class AssistantResponse:
         self.__attachments.append(attachment)
 
         # Wake up anything waiting in get_attachments()
-        old_waiter = self.__attachment_waiter
-        self.__attachment_waiter = None
-        if old_waiter is not None:
-            old_waiter.set_result(None)
-
-    def __wait_for_attachment(self):
-        """Wait for either another attachment to be added via attach() or
-        for all action tasks to be finished.
-        Returns a future that must be awaited."""
-
-        waiter = self.__attachment_waiter
-        if not waiter:
-            waiter = asyncio.Future()
-            self.__attachment_waiter = waiter
-
-        return waiter
+        self.__attachment_cond.notify_all()
 
     async def get_attachments(self):
         """Asynchronously returns a list of attachments, in arbitrary order."""
@@ -100,8 +84,9 @@ class AssistantResponse:
             i += 1
 
         while self._pending_actions:
-            waiter = self.__wait_for_attachment()
-            await waiter
+            # Wait for either another attachment to be added via attach() or
+            # for all action tasks to be finished.
+            await self.__attachment_cond.wait()
 
             while i < len(self.__attachments):
                 yield self.__attachments[i]
