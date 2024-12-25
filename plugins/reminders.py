@@ -5,7 +5,6 @@ from datetime import datetime, date, time, timedelta, timezone
 
 from lib.plugin import Plugin, hook, action, system_prompt, pinned_message
 from lib.msgtypes import UserMessage
-from lib.views import EditMemoryFileModal
 
 
 class Reminder:
