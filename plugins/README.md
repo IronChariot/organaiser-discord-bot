@@ -17,6 +17,7 @@ Assistant instance.
 To add a bit to the system prompt, declare a non-async method with
 `@system_prompt`.  It will be called at the beginning of a session (and passed
 the Session object as argument) to generate the system prompt for that session.
+You may tag any number of methods with `@system_prompt`.
 
 To add a bit that needs to be regenerated upon every individual assistant
 response use `@system_prompt(dynamic=True)`.
@@ -45,14 +46,6 @@ initialise any variables.
 Called once after `load`, and every time after the configuration file has been
 changed.  Is passed a dict containing the configuration block for this specific
 plugin.
-
-#### `@hook('system_prompt')`
-
-**Parameters:** none
-**Returns:** `None`
-
-Called when the system prompt is being generated, this should return any extra
-information that the plugin needs to be added to the system prompt.
 
 #### `@hook('session_load')`
 
