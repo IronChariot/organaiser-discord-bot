@@ -308,3 +308,44 @@ class GeminiModel(Model):
         except Exception as e:
             print("Error: " + str(e))
             return "Error querying the LLM: " + str(e)
+        
+class DeepSeekModel(Model):
+    def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
+        model_name = "deepseek-chat"  # $0.14 / 1M tokens Input, $0.28/1M tokens Output
+        super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
+        DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+        print(f"Key: {DEEPSEEK_API_KEY}")
+        self.client = AsyncOpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com")
+
+    def encode_message(self, message):
+        encoded = {"role": message.role.value}
+        if message.attachments:
+            encoded["content"] = []
+            if message.content:
+                encoded["content"].append({"type": "text", "text": message.content})
+            for attach in message.attachments:
+                encoded["content"].append({"type": "image_url", "image_url": {"url": attach.url}})
+        else:
+            encoded["content"] = message.content
+        return encoded
+
+    async def chat_completion(self, messages=[], model='deepseek-chat', temperature=0.0, max_tokens=1024, system_prompt=""):
+        messages = [self.encode_message(message) for message in messages if message.role != Role.SYSTEM]
+        if system_prompt:
+            messages.insert(0, {"role": "system", "content": system_prompt})
+
+        try:
+            chat_completion = await self.client.chat.completions.create(
+                messages=messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=False
+            )
+
+            text_response = chat_completion.choices[0].message.content
+            return text_response
+
+        except Exception as e:
+            print("Error: " + str(e))
+            return "Error querying the LLM: " + str(e)

@@ -40,7 +40,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", dest="daemonize", action="store_true", help="daemonize the process (runs in the background)")
     parser.add_argument("--date", help="make or continue the session for a give date (in YYYY-MM-DD format)")
-    parser.add_argument("assistant", help="name of the .toml file of the assistant to run, without .toml extension", default='naiser')
+    parser.add_argument("assistant", nargs='?', help="name of the .toml file of the assistant to run, without .toml extension", default='naiser')
     args = parser.parse_args()
 
     assistant = Assistant.load(args.assistant)

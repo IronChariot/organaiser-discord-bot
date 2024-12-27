@@ -68,6 +68,8 @@ class Assistant:
             model = models.OpenRouterModel(model_name)
         elif model_name.startswith('gemini-'):
             model = models.GeminiModel(model_name)
+        elif model_name.startswith('deepseek-'):
+            model = models.DeepSeekModel(model_name)
         else:
             model = models.OllamaModel(model_name)
 

@@ -104,6 +104,7 @@ class Bot(discord.Client):
 
         # Check when the next check-in should be
         prompt_after = 10
+        deadline = datetime.now(tz=timezone.utc) + timedelta(minutes=prompt_after)
         message = self.session.get_last_assistant_message()
         if message and message.timestamp:
             try:
