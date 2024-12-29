@@ -252,12 +252,15 @@ class Bot(discord.Client):
             if not chat and response.reactions and not message:
                 chat = ''.join(response.reactions)
 
+            # A message with just "actions taken" sends no notification
+            silent = not chat and not files
+
             # Add a log of actions taken in small text
             if response.actions_taken:
                 chat = '\n-# '.join([chat or ''] + response.actions_taken)
 
             if chat or files:
-                tasks.insert(0, self.send_message(self.chat_channel, chat, files=files))
+                tasks.insert(0, self.send_message(self.chat_channel, chat, files=files, silent=silent))
 
         # Check exceptions and report them.  This includes any exceptions from
         # the action tasks, which were ignored earlier.
@@ -293,7 +296,7 @@ class Bot(discord.Client):
 
         await self.send_message(self.bugs_channel, report)
 
-    async def send_message(self, channel, message, files=[]):
+    async def send_message(self, channel, message, files=[], silent=False):
         limit = MESSAGE_LIMIT
         if message and len(message) > limit and '```' in message:
             # Hard case, preserve preformatted blocks across split messages.
@@ -322,7 +325,7 @@ class Bot(discord.Client):
 
             # Last one gets sent with the files
             if send_next or files:
-                last_msg = await channel.send(send_next, files=files)
+                last_msg = await channel.send(send_next, files=files, silent=silent)
 
         elif message and message.strip():
             # Simple case
@@ -330,10 +333,10 @@ class Bot(discord.Client):
             for part in parts[:-1]:
                 await channel.send(part)
 
-            last_msg = await channel.send(parts[-1], files=files)
+            last_msg = await channel.send(parts[-1], files=files, silent=silent)
 
         elif files:
-            last_msg = await channel.send(files=files)
+            last_msg = await channel.send(files=files, silent=silent)
 
         else:
             return None
