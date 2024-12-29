@@ -5,7 +5,7 @@ timezone = "Europe/London"
 rollover = 04:00:00
 summarisation_threshold = 20
 unsummarised_messages = 8
-response_delay = 1
+response_delay = 2
 
 [discord]
 chat_channel = "naiser"
