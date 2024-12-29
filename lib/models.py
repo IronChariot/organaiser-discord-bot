@@ -39,10 +39,10 @@ class Model(ABC):
 
             valid = True
             if as_json:
-                # Some models surround JSON with triple backticks
-                if text_response.startswith('```json'):
-                    text_response = text_response[7:]
-                text_response = text_response.strip('`\n\t ')
+                # Some models will text other than the JSON response
+                # Best way to find the JSON alone would be to specifically get everything from the { to the }
+                text_response = text_response[text_response.find("{"):text_response.rfind("}") + 1]
+
                 try:
                     response = json.loads(text_response, strict=False)
                 except json.JSONDecodeError:
@@ -259,6 +259,8 @@ class GeminiModel(Model):
         import google.generativeai as genai
         if model_name == "gemini-2.0-flash":
             model_name = "gemini-2.0-flash-exp"
+        elif model_name == "gemini-2.0-flash-thinking":
+            model_name = "gemini-2.0-flash-thinking-exp-1219"
         elif model_name == "gemini-1.5-flash":
             pass
         elif model_name == "gemini-1.5-pro":
@@ -284,7 +286,7 @@ class GeminiModel(Model):
 
     async def chat_completion(self, messages=[], model='gemini-2.0-flash-exp', temperature=0.0, max_tokens=1024, system_prompt=""):
         import google.generativeai as genai
-        history = [{"role": message.role.value, "parts": [message.content]} for message in messages[:-1] if message.role != Role.SYSTEM]
+        history = [{"role": "model" if message.role.value == "assistant" else "user", "parts": [message.content]} for message in messages[:-1] if message.role != Role.SYSTEM]
         if system_prompt != "" and system_prompt != None:
             # Need to recreate the model with the system prompt as the system instruction
             self.client = genai.GenerativeModel(
