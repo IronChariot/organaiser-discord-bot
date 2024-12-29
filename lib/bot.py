@@ -276,7 +276,7 @@ class Bot(discord.Client):
             return
 
         if isinstance(report, BaseException):
-            trace = ''.join(traceback.format_exception(report)).rstrip()
+            trace = ''.join(traceback.format_exception(None, report, report.__traceback__)).rstrip()
             # Hack to insert zero-width spaces
             trace = trace.replace('```', '`​`​`')
             report = f'```python\n{trace}\n```'

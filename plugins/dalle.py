@@ -49,7 +49,7 @@ class DallEPlugin(Plugin):
 
     @action('images')
     async def on_generate_images(self, response, *, images=[]):
-        for fut in asyncio.as_completed(self.generate_image(**image) for image in images):
+        for fut in asyncio.as_completed([self.generate_image(**image) for image in images]):
             response.attach(await fut)
 
     async def generate_image(self, prompt: str, size: str, quality: str = "standard", style: str = "natural"):
