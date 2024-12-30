@@ -33,6 +33,7 @@ class Assistant:
         self.timezone = None
         self.rollover = None
         self.response_delay = 1
+        self.default_prompt_after = 30
 
         self.plugins = {}
         self.__hooks = defaultdict(list)
@@ -89,6 +90,7 @@ class Assistant:
         ass.summarisation_threshold = data.get('summarisation_threshold')
         ass.unsummarised_messages = data.get('unsummarised_messages', 1000)
         ass.response_delay = data.get('response_delay', 1)
+        ass.default_prompt_after = data.get('default_prompt_after', 30)
 
         for plugin, config in data.get('plugins', {}).items():
             if config.get('enabled'):

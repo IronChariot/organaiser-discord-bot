@@ -103,7 +103,7 @@ class Bot(discord.Client):
         print("Starting response loop.")
 
         # Check when the next check-in should be
-        prompt_after = 10
+        prompt_after = self.assistant.default_prompt_after
         deadline = datetime.now(tz=timezone.utc) + timedelta(minutes=prompt_after)
         message = self.session.get_last_assistant_message()
         if message and message.timestamp:
@@ -167,7 +167,7 @@ class Bot(discord.Client):
                 if response is not None and response.prompt_after is not None:
                     prompt_after = response.prompt_after
                 else:
-                    prompt_after = 10
+                    prompt_after = self.assistant.default_prompt_after
                 deadline = self.session.last_message.timestamp + timedelta(minutes=prompt_after)
 
             except Exception as ex:
