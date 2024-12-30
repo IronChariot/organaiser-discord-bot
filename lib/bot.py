@@ -200,13 +200,16 @@ class Bot(discord.Client):
         if not response:
             return
 
-        # Find the corresponding user message.
-        message = None
-        if response.user_message and response.user_message.id:
+        # Find the corresponding user messages.
+        messages = []
+        for user_message in response.user_messages:
             try:
-                message = await self.chat_channel.fetch_message(response.user_message.id)
+                messages.append(await self.chat_channel.fetch_message(user_message.id))
             except:
                 message = None
+
+        first_message = messages[0] if messages else None
+        last_message = messages[-1] if messages else None
 
         response_time = datetime.now(tz=timezone.utc)
 
@@ -219,8 +222,8 @@ class Bot(discord.Client):
         if self.log_channel:
             log_message = format_json_md(response.raw_data)
 
-            if response.user_message and response.user_message.content:
-                quoted_message = '\n> '.join(response.user_message.content.split('\n'))
+            if response.user_messages:
+                quoted_message = '\n> '.join(line for um in response.user_messages if um.content for line in um.content.splitlines())
                 log_message = f'> {quoted_message}\n\n{log_message}'
 
             log_future = asyncio.create_task(
@@ -230,11 +233,11 @@ class Bot(discord.Client):
         if response.bug_report and self.bugs_channel:
             # This depends on the log future since it includes a jump link to
             # the log message
-            tasks.append(asyncio.create_task(self.write_bug_report(response.bug_report, message, log_future=log_future)))
+            tasks.append(asyncio.create_task(self.write_bug_report(response.bug_report, first_message, log_future=log_future)))
 
-        if message:
+        if last_message:
             for emoji in response.reactions:
-                tasks.append(asyncio.create_task(message.add_reaction(emoji)))
+                tasks.append(asyncio.create_task(last_message.add_reaction(emoji)))
 
         if self.chat_channel:
             # Convert all attachments into Discord files
@@ -249,7 +252,7 @@ class Bot(discord.Client):
             # If there's no chat message and there's no user message to react to
             # then the react becomes the chat message
             chat = response.chat
-            if not chat and response.reactions and not message:
+            if not chat and response.reactions and not last_message:
                 chat = ''.join(response.reactions)
 
             # A message with just "actions taken" sends no notification
@@ -269,7 +272,7 @@ class Bot(discord.Client):
         exc = None
         for result in await gatherer:
             if isinstance(result, Exception):
-                await self.write_bug_report(result, message=message, log_future=log_future)
+                await self.write_bug_report(result, message=messages[0] if messages else None, log_future=log_future)
 
         return response
 

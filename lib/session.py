@@ -217,13 +217,19 @@ class Session:
             if self.should_summarise():
                 await self.create_summary()
 
-            user_message = self.message_history[-1]
+            # Gather the user messages we are responding to
+            user_messages = []
+            for user_message in reversed(self.message_history):
+                if user_message.role != Role.USER:
+                    break
+                user_messages.insert(0, user_message)
+
             data = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
 
             self.message_history[-1].dump(self.messages_file)
             self.messages_file.flush()
 
-        return AssistantResponse(self, data, user_message)
+        return AssistantResponse(self, data, user_messages)
 
     async def isolated_query(self, query, attachments=[], format_prompt=None, as_json=False):
         # Runs an isolated query on this session.

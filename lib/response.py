@@ -5,10 +5,10 @@ from .util import split_emoji, Condition
 
 
 class AssistantResponse:
-    def __init__(self, session, data, user_message=None):
+    def __init__(self, session, data, user_messages=()):
         self.session = session
         self.raw_data = data
-        self.user_message = user_message
+        self.user_messages = user_messages
 
         self.chat = data.get('chat') or None
         self.reactions = list(split_emoji(data.get('react') or ''))
