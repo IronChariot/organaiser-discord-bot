@@ -191,10 +191,15 @@ class RemindersPlugin(Plugin):
             else:
                 self.reminders.append(reminder)
 
-        if num_removed == 1:
-            return f'Removed 1 reminder'
-        elif num_removed > 1:
+        if num_removed == 0:
+            return
+
+        self.save_reminders()
+
+        if num_removed > 1:
             return f'Removed {num_removed} reminders'
+        else:
+            return f'Removed 1 reminder'
 
     @action('add_reminders')
     async def on_add_reminders(self, response, *, add_reminders=()):
