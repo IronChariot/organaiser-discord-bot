@@ -12,7 +12,7 @@ class Reminder:
         self.id = None
         self.time = time
         self.text = text
-        if repeat and repeat.lower() not in ('none', 'null'):
+        if repeat and repeat.lower() not in ('none', 'null', 'never'):
             if repeat.startswith('1 '):
                 repeat = repeat.strip('1 s')
             self.repeat = repeat
@@ -29,7 +29,7 @@ class Reminder:
 
         interval = self.repeat.rstrip('s')
         if ' ' in interval:
-            count, interval = interval.split(' ')
+            count, interval = interval.split(' ', 1)
             count = int(count)
         else:
             count = 1
@@ -67,6 +67,43 @@ class Reminder:
             new_month += 1
             time = time.replace(year=time.year + carry, month=new_month)
         return time
+
+    @property
+    def repeat_adjective(self):
+        if not self.repeat:
+            return 'one-time'
+
+        interval = self.repeat.rstrip('s')
+        count = 1
+        if ' ' in interval and not interval.startswith('1 '):
+            count, interval = interval.split(' ', 1)
+            count = int(count)
+
+        if interval == 'day':
+            interval = 'dai'
+
+        if count == 1:
+            return interval + 'ly'
+
+        if interval == 'year':
+            interval = 'ennial'
+        else:
+            interval += 'ly'
+
+        if count == 2:
+            if interval == 'weekly':
+                return 'fortnightly'
+            return f'bi{interval}'
+
+        if count == 3:
+            if interval == 'monthly':
+                return 'quarterly'
+            return f'tri{interval}'
+
+        if count == 6 and interval == 'monthly':
+            return 'semiannual'
+
+        return f'{count}-{interval}'
 
     def __eq__(self, other):
         return (self.time == other.time and
@@ -239,7 +276,7 @@ class RemindersPlugin(Plugin):
             if reminder.repeat == 'day':
                 actions.append(f'Added daily reminder at <t:{timestamp}:t> starting {rel_date}')
             elif reminder.repeat:
-                actions.append(f'Added {reminder.repeat}ly reminder starting {rel_date}')
+                actions.append(f'Added {reminder.repeat_adjective} reminder starting {rel_date}')
             elif rel_date == 'today':
                 actions.append(f'Added reminder going off <t:{timestamp}:R>')
             else:
@@ -280,7 +317,7 @@ class RemindersPlugin(Plugin):
         print(f'Responding to reminder R{reminder.id:03} for {reminder.time}: {reminder.text}')
         msg = f'SYSTEM: Reminder R{reminder.id:03} from your past self now going off: {reminder.text}.'
         if reminder.repeat:
-            msg += f' Reminder will repeat after {reminder.repeat}.'
+            msg += f' Reminder will repeat every {reminder.repeat}.'
         else:
             msg += ' Reminder has been removed.'
         await session.push_message(UserMessage(msg))
