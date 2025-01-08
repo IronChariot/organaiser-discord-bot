@@ -29,9 +29,7 @@ class Plugin:
         if name not in cls._registry:
             importlib.import_module(name)
 
-        plugin = cls._registry[name](assistant)
-        asyncio.run(plugin._async_init())
-        return plugin
+        return cls._registry[name](assistant)
 
     def __init__(self, assistant):
         self.__assistant = assistant

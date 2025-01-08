@@ -34,9 +34,9 @@ class Retry(discord.ui.View):
 
 
 class Bot(discord.Client):
-    def __init__(self, session):
-        self.session = session
-        self.assistant = session.assistant
+    def __init__(self, assistant, session_date):
+        self.assistant = assistant
+        self.session_date = session_date
         self.chat_channel = None
         self.log_channel = None
         self.diary_channel = None
@@ -547,11 +547,16 @@ class Bot(discord.Client):
     async def setup_hook(self):
         self.__ready = asyncio.Future()
 
+        # Initialise the plug-ins
+        await self.assistant.load_plugins()
         for plugin in self.assistant.plugins.values():
             plugin._init_bot(self)
 
             for func in plugin._discord_commands:
                 self._register_command(func)
+
+        # Load the session
+        self.session = await self.assistant.load_session(self.session_date)
 
         self.rollover_lock = asyncio.Lock()
 

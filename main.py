@@ -3,25 +3,37 @@ from contextlib import contextmanager
 import argparse
 import asyncio
 import discord
+import json
 
 from lib.assistant import Assistant
 from lib.bot import Bot
 from lib.msgtypes import UserMessage
 
 
-def run_local(session):
-    response = session.get_last_assistant_response()
-    if response:
-        print(response.get("chat") or response.get("react") or "(no response)")
+async def run_local(assistant, session_date):
+    await assistant.load_plugins()
+
+    session = await assistant.load_session(session_date)
+    message = session.get_last_assistant_message()
+    if message:
+        try:
+            response = message.parse_json()
+            print(response.get("chat") or response.get("react") or "(no response)")
+        except json.JSONDecodeError:
+            pass
 
     while True:
-        message = UserMessage(input("> "))
-        response = asyncio.run(session.chat(message))
-        print("\n" + (response.get("chat") or response.get("react") or "(no response)"))
+        try:
+            message = UserMessage(input("> "))
+        except EOFError:
+            return
+
+        response = await session.chat(message)
+        print("\n" + (response.chat or ''.join(response.reactions) or "(no response)"))
 
 
-def run_discord_bot(assistant, session, token):
-    bot = Bot(session)
+def run_discord_bot(assistant, session_date, token):
+    bot = Bot(assistant, session_date)
     bot.run(token)
 
 
@@ -44,6 +56,7 @@ def main():
     args = parser.parse_args()
 
     assistant = Assistant.load(args.assistant)
+    session_date = date.fromisoformat(args.date) if args.date else assistant.get_today()
 
     # Make sure there isn't already an instance running of this assistant
     pidfile_path = os.path.abspath(f"{assistant.id}.pid")
@@ -52,9 +65,6 @@ def main():
             pid = pidf.read()
         print(f"Assistant {args.assistant} is already running (pid={pid}). Delete {pidfile_path} if this is not the case")
         sys.exit(1)
-
-    with pidfile(pidfile_path):
-        session = asyncio.run(assistant.load_session(date.fromisoformat(args.date) if args.date else assistant.get_today()))
 
     token = os.environ.get('DISCORD_TOKEN')
 
@@ -65,17 +75,17 @@ def main():
 
             with daemon.DaemonContext():
                 with pidfile(pidfile_path):
-                    run_discord_bot(assistant, session, token=token)
+                    run_discord_bot(assistant, session_date, token=token)
         else:
             with pidfile(pidfile_path):
-                run_discord_bot(assistant, session, token=token)
+                run_discord_bot(assistant, session_date, token=token)
 
     elif args.daemonize:
         print("No Discord configuration; cannot run as daemon.")
         sys.exit(1)
     else:
         print("No Discord configuration; running locally.")
-        run_local(session)
+        asyncio.run(run_local(assistant, session_date))
 
 
 if __name__ == '__main__':

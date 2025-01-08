@@ -28,6 +28,7 @@ class Assistant:
         self.max_tokens = 1024
         self.prompt_template = []
         self.discord_config = {}
+        self.plugin_config = {}
         self.summarisation_threshold = None
         self.unsummarised_messages = 1000
         self.timezone = None
@@ -91,19 +92,22 @@ class Assistant:
         ass.unsummarised_messages = data.get('unsummarised_messages', 1000)
         ass.response_delay = data.get('response_delay', 1)
         ass.default_prompt_after = data.get('default_prompt_after', 30)
-
-        for plugin, config in data.get('plugins', {}).items():
-            if config.get('enabled'):
-                ass.load_plugin(plugin, config)
-
+        ass.plugin_config = data.get('plugins', {})
         return ass
 
-    def load_plugin(self, name, config):
+    async def load_plugins(self):
+        for plugin, config in self.plugin_config.items():
+            if config.get('enabled'):
+                await self.load_plugin(plugin, config)
+
+    async def load_plugin(self, name, config):
         if name in self.plugins:
             plugin = self.plugins[name]
         else:
             plugin = Plugin.load(name, self)
             self.plugins[name] = plugin
+
+            await plugin._async_init()
 
             for name, hook in plugin._hooks.items():
                 self.__hooks[name].append(hook)
@@ -112,7 +116,7 @@ class Assistant:
                 self.__actions[key] = func
 
         for hook in plugin._get_hooks('configure'):
-            asyncio.run(hook(config))
+            await hook(config)
 
         return plugin
 
