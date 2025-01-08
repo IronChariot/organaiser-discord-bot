@@ -2,6 +2,8 @@ import discord
 import json
 import asyncio
 
+from .util import split_message
+
 
 class RetryButton(discord.ui.View):
     def __init__(self):
@@ -30,22 +32,29 @@ class CloseButton(discord.ui.View):
 
 
 class EditSystemPromptModal(discord.ui.Modal, title='Edit System Prompt for Today'):
-    prompt = discord.ui.TextInput(
-        label='Prompt',
-        style=discord.TextStyle.paragraph,
-        placeholder='',
-        required=True,
-        min_length=1,
-    )
-
     def __init__(self, session):
+        self.inputs = []
         super().__init__()
+
+        for part in split_message(session.message_history[0].content, 4000):
+            input = discord.ui.TextInput(
+                label='Prompt',
+                style=discord.TextStyle.paragraph,
+                placeholder='',
+                required=True,
+                min_length=0,
+            )
+            input.default = part
+            self.inputs.append(input)
+            self.add_item(input)
+
         self.session = session
-        self.prompt.default = session.message_history[0].content
 
     async def on_submit(self, interaction: discord.Interaction):
+        new_prompt = '\n'.join(input.value for input in self.inputs).strip()
+
         async with self.session.context_lock:
-            self.session.message_history[0].content = self.prompt.value
+            self.session.message_history[0].content = new_prompt
             self.session._rewrite_message_file()
 
         await interaction.response.send_message(f'Updated system prompt.', ephemeral=True, silent=True)
