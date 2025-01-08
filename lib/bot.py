@@ -566,6 +566,13 @@ class Bot(discord.Client):
         # Load the session
         self.session = await self.assistant.load_session(self.session_date)
 
+        @self.tree.command(name="system", description="Send a system message to the assistant")
+        async def system_msg(interaction: discord.Interaction, message: str):
+            text = f'SYSTEM: {message}'
+            message = self.make_user_message(text)
+            await self.session.push_message(message)
+            await interaction.response.send_message(text)
+
         self.rollover_lock = asyncio.Lock()
 
         rollover_time = self.assistant.rollover.replace(tzinfo=self.assistant.timezone)
