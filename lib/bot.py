@@ -117,18 +117,22 @@ class Bot(discord.Client):
                 deadline = message.timestamp + timedelta(minutes=prompt_after)
 
         while True:
-            # Wait for a new user message, or the prompt_after to time out
+            # Wait for a new user message, or the prompt_after to time out,
+            # or the next rollover, whichever comes first
+            next_rollover = self.session.get_next_rollover()
             cur_time = datetime.now(tz=timezone.utc)
-            seconds_left = (deadline - cur_time).total_seconds()
-            if deadline < cur_time:
+            if next_rollover < cur_time:
+                pass
+            elif deadline < cur_time:
                 print("Next check-in OVERDUE by", cur_time - deadline)
             else:
                 print("Next check-in at", deadline)
+                seconds_left = (min(deadline, next_rollover) - cur_time).total_seconds()
                 try:
                     if self.session.last_message.role != Role.USER:
                         await asyncio.wait_for(self.session.new_user_message, timeout=seconds_left)
 
-                    # If we got one, wait a bit for inactivity
+                    # If we got a message, wait a bit for inactivity
                     delay = self.assistant.response_delay
                     if delay > 0:
                         while True:
@@ -140,8 +144,13 @@ class Bot(discord.Client):
             last_message = self.session.last_message
             if last_message.role != Role.USER:
                 # There's no user message to respond to, we have to generate
-                # one, presumably we just woke up due to the prompt_after
+                # one, presumably we just woke up due to the prompt_after or
+                # the rollover window
                 cur_time = datetime.now(tz=timezone.utc)
+                if cur_time >= next_rollover:
+                    await self.perform_rollover()
+                    continue
+
                 if cur_time < deadline:
                     # What?  Apparently not?
                     print(f"Woke up spuriously with {deadline - cur_time} to go.")
@@ -506,8 +515,7 @@ class Bot(discord.Client):
     async def on_raw_message_delete(self, payload):
         self.session.delete_message(payload.message_id)
 
-    @tasks.loop(reconnect=True)
-    async def check_rollover(self):
+    async def perform_rollover(self):
         date = self.assistant.get_today()
         if date == self.session.date:
             print(f'Not rolling over, date is still {date}')
@@ -562,8 +570,6 @@ class Bot(discord.Client):
 
         rollover_time = self.assistant.rollover.replace(tzinfo=self.assistant.timezone)
         print(f'Date is {self.session.date}, next rollover scheduled at {rollover_time}')
-        self.check_rollover.change_interval(time=rollover_time)
-        self.check_rollover.start()
 
         for plugin in self.assistant.plugins.values():
             for pin in plugin._pinned_messages:
