@@ -573,6 +573,11 @@ class Bot(discord.Client):
             await self.session.push_message(message)
             await interaction.response.send_message(text)
 
+        @self.tree.command(name="edit_system_prompt", description="Edit today's system prompt")
+        async def edit_system_prompt(interaction: discord.Interaction):
+            modal = views.EditSystemPromptModal(self.session)
+            await interaction.response.send_modal(modal)
+
         self.rollover_lock = asyncio.Lock()
 
         rollover_time = self.assistant.rollover.replace(tzinfo=self.assistant.timezone)

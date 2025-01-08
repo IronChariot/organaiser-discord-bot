@@ -27,3 +27,25 @@ class CloseButton(discord.ui.View):
     async def btn_close(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.message.delete()
         self.stop()
+
+
+class EditSystemPromptModal(discord.ui.Modal, title='Edit System Prompt for Today'):
+    prompt = discord.ui.TextInput(
+        label='Prompt',
+        style=discord.TextStyle.paragraph,
+        placeholder='',
+        required=True,
+        min_length=1,
+    )
+
+    def __init__(self, session):
+        super().__init__()
+        self.session = session
+        self.prompt.default = session.message_history[0].content
+
+    async def on_submit(self, interaction: discord.Interaction):
+        async with self.session.context_lock:
+            self.session.message_history[0].content = self.prompt.value
+            self.session._rewrite_message_file()
+
+        await interaction.response.send_message(f'Updated system prompt.', ephemeral=True, silent=True)
