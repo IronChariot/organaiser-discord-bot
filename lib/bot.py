@@ -46,7 +46,10 @@ class Bot(discord.Client):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.members = True
+        intents.typing = True
         super().__init__(intents=intents)
+
+        self.typing_timeout = None
 
         self.tree = app_commands.CommandTree(self)
         self.__pinned_messages = []
@@ -126,10 +129,19 @@ class Bot(discord.Client):
             elif deadline < cur_time:
                 print("Next check-in OVERDUE by", cur_time - deadline)
             else:
-                print("Next check-in at", deadline)
-                seconds_left = (min(deadline, next_rollover) - cur_time).total_seconds()
+                if self.session.last_message.role == Role.USER:
+                    # Wait for user to be done typing
+                    if self.typing_timeout is not None:
+                        seconds_left = (self.typing_timeout - cur_time).total_seconds()
+                        if seconds_left > 0:
+                            print(f"Waiting {seconds_left:.1f} more seconds since user is typing")
+                else:
+                    # Nothing to respond to, wait for next prompt_after or rollover
+                    print("Next check-in at", deadline)
+                    seconds_left = (min(deadline, next_rollover) - cur_time).total_seconds()
+
                 try:
-                    if self.session.last_message.role != Role.USER:
+                    if seconds_left > 0:
                         await asyncio.wait_for(self.session.new_user_message, timeout=seconds_left)
 
                     # If we got a message, wait a bit for inactivity
@@ -140,6 +152,12 @@ class Bot(discord.Client):
 
                 except asyncio.TimeoutError:
                     pass
+
+            # If the user started typing in the meantime, wait a bit longer
+            if self.typing_timeout is not None:
+                cur_time = datetime.now(tz=timezone.utc)
+                if cur_time < self.typing_timeout:
+                    continue
 
             last_message = self.session.last_message
             if last_message.role != Role.USER:
@@ -473,6 +491,10 @@ class Bot(discord.Client):
             new_messages.append(self.make_user_message('SYSTEM: End of missed messages.'))
             await self.session.push_messages(new_messages)
 
+    async def on_typing(self, channel, user, when):
+        if channel == self.chat_channel:
+            self.typing_timeout = when + timedelta(seconds=10)
+
     async def on_message(self, message):
         if message.author == self.user:
             return
@@ -481,6 +503,7 @@ class Bot(discord.Client):
             return
 
         if message.channel == self.chat_channel:
+            self.typing_timeout = None
             msg = self.make_user_message(f'{message.author.display_name}: {message.content}', message, message.attachments)
             await self.session.push_message(msg)
 
