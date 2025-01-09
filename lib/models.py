@@ -123,6 +123,10 @@ class AnthropicModel(Model):
             model_name = "claude-3-5-sonnet-20241022" # $3/$15
         elif model_name == "claude-haiku":
             model_name = "claude-3-5-haiku-20241022" # $1/$5
+        elif model_name == "claude-3-sonnet":
+            model_name = "claude-3-sonnet-20240229"
+        elif model_name == "claude-3-haiku":
+            model_name = "claude-3-haiku-20240307"
         else: # Default to sonnet model
             model_name = "claude-3-5-sonnet-20241022"
             print("Invalid model specified. Defaulting to claude-3-5-sonnet-20241022.")
