@@ -201,6 +201,8 @@ class Session:
         """Asks the assistant to respond to the current message history,
         if there are any user messages to respond to, or None."""
 
+        await asyncio.gather(*self.assistant.call_hooks('pre_query_assistant_response', self))
+
         system_prompt = self.message_history[0].content + \
                         "\n\n" + \
                         self.standard_format_prompt
@@ -231,7 +233,7 @@ class Session:
 
         return AssistantResponse(self, data, user_messages)
 
-    async def isolated_query(self, query, attachments=[], format_prompt=None, as_json=False):
+    async def isolated_query(self, query, attachments=[], format_prompt=None, as_json=False, model=None):
         # Runs an isolated query on this session.
         system_prompt = self.message_history[0].content
 
@@ -243,7 +245,10 @@ class Session:
         message = UserMessage(query)
         message.attachments[:] = attachments
         messages = self.message_history + [message]
-        response = await self.assistant.model.query(messages, system_prompt=system_prompt, as_json=as_json)
+
+        if model is None:
+            model = self.assistant.model
+        response = await model.query(messages, system_prompt=system_prompt, as_json=as_json)
 
         print("Response:", response)
         return response

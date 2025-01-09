@@ -13,6 +13,7 @@ HOOK_NAMES = (
     'init',
     'session_load',
     'configure',
+    'pre_query_assistant_response',
     'post_session_end',
 )
 
