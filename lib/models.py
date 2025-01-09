@@ -1,5 +1,6 @@
 import requests
 import json
+import re
 from base64 import standard_b64encode
 import logging
 from abc import ABC, abstractmethod
@@ -39,14 +40,30 @@ class Model(ABC):
 
             valid = True
             if as_json:
-                # Some models will text other than the JSON response
+                # Some models will output text other than the JSON response
                 # Best way to find the JSON alone would be to specifically get everything from the { to the }
-                text_response = text_response[text_response.find("{"):text_response.rfind("}") + 1]
+                first_brace = text_response.find("{")
+                first_bracket = text_response.find("[")
+                if first_bracket >= 0 and (first_brace < 0 or first_bracket < first_brace):
+                    text_response = text_response[first_bracket:text_response.rfind("]") + 1]
+                else:
+                    text_response = text_response[text_response.find("{"):text_response.rfind("}") + 1]
 
-                try:
-                    response = json.loads(text_response, strict=False)
-                except json.JSONDecodeError:
-                    valid = False
+                if not text_response:
+                    response = None
+                else:
+                    try:
+                        response = json.loads(text_response, strict=False)
+                    except json.JSONDecodeError:
+                        # Remove comments
+                        if '//' in text_response:
+                            text_response = re.sub(r'([\[\]\{\},"])\s*//.*$', '\\1', text_response, flags=re.MULTILINE)
+                            try:
+                                response = json.loads(text_response, strict=False)
+                            except json.JSONDecodeError:
+                                valid = False
+                        else:
+                            valid = False
             else:
                 response = text_response
 
