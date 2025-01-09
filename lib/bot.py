@@ -131,6 +131,7 @@ class Bot(discord.Client):
             else:
                 if self.session.last_message.role == Role.USER:
                     # Wait for user to be done typing
+                    seconds_left = 0
                     if self.typing_timeout is not None:
                         seconds_left = (self.typing_timeout - cur_time).total_seconds()
                         if seconds_left > 0:
