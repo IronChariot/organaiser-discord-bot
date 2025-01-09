@@ -62,18 +62,7 @@ class Assistant:
         ident = data.get('id', ident)
 
         model_name = data['model']
-        if model_name.startswith('claude-'):
-            model = models.AnthropicModel(model_name)
-        elif model_name.startswith('gpt-'):
-            model = models.OpenAIModel(model_name)
-        elif model_name.startswith('openrouter-'):
-            model = models.OpenRouterModel(model_name)
-        elif model_name.startswith('gemini-'):
-            model = models.GeminiModel(model_name)
-        elif model_name.startswith('deepseek-'):
-            model = models.DeepSeekModel(model_name)
-        else:
-            model = models.OllamaModel(model_name)
+        model = models.create(model_name)
 
         ass = Assistant(ident, model)
         if 'temperature' in data:

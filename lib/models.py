@@ -355,3 +355,18 @@ class DeepSeekModel(Model):
         except Exception as e:
             print("Error: " + str(e))
             return "Error querying the LLM: " + str(e)
+
+
+def create(model_name):
+    if model_name.startswith('claude-'):
+        return AnthropicModel(model_name)
+    elif model_name.startswith('gpt-'):
+        return OpenAIModel(model_name)
+    elif model_name.startswith('openrouter-'):
+        return OpenRouterModel(model_name)
+    elif model_name.startswith('gemini-'):
+        return GeminiModel(model_name)
+    elif model_name.startswith('deepseek-'):
+        return DeepSeekModel(model_name)
+    else:
+        return OllamaModel(model_name)
