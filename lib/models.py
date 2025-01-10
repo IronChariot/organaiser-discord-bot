@@ -301,9 +301,31 @@ class GeminiModel(Model):
         GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
         genai.configure(api_key=GEMINI_API_KEY)
 
+    async def encode_parts(self, message):
+        import google.generativeai as genai
+
+        parts = []
+        if message.content:
+            parts.append(message.content)
+
+        for attach in message.attachments:
+            data = standard_b64encode(await attach.read())
+            parts.append({
+                "mime_type": attach.content_type,
+                "data": data.decode("ascii"),
+            })
+
+        return parts
+
+    async def encode_message(self, message):
+        return {
+            "role": "model" if message.role == Role.ASSISTANT else "user",
+            "parts": await self.encode_parts(message),
+        }
+
     async def chat_completion(self, messages=[], model='gemini-2.0-flash-exp', temperature=0.0, max_tokens=1024, system_prompt="", return_type=str):
         import google.generativeai as genai
-        history = [{"role": "model" if message.role == Role.ASSISTANT else "user", "parts": [message.content]} for message in messages[:-1] if message.role != Role.SYSTEM]
+        history = [await self.encode_message(message) for message in messages[:-1] if message.role != Role.SYSTEM]
 
         # Need to recreate the model with the system prompt as the system instruction
         client = genai.GenerativeModel(
@@ -320,7 +342,7 @@ class GeminiModel(Model):
 
         try:
             chat_session = client.start_chat(history=history)
-            response = await chat_session.send_message_async(messages[-1].content)
+            response = await chat_session.send_message_async(await self.encode_parts(messages[-1]))
             text_response = response.text
             return text_response
 
