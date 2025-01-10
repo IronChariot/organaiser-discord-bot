@@ -22,7 +22,7 @@ class Model(ABC):
         self.max_tokens = max_tokens
         self.logger = logger or logging.getLogger(__name__)
 
-    async def query(self, messages: List[Message], system_prompt=None, validate_func=None, as_json=False) -> str:
+    async def query(self, messages: List[Message], system_prompt=None, validate_func=None, return_type=str) -> str:
         temperature = self.temperature
         max_attempts = int((1.0 - temperature) / 0.1) + 1  # Calculate max attempts to reach t=1.0
 
@@ -34,19 +34,17 @@ class Model(ABC):
                 self.logger.info(f"Querying model (Attempt {attempt + 1}, Temperature: {temperature})")
             self.logger.info(f"User message: {messages[-1].content}")
 
-            text_response = await self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt)
+            text_response = await self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt, return_type)
             response_time = datetime.now(tz=timezone.utc)
             self.logger.info(f"Model response: {text_response}")
 
             valid = True
-            if as_json:
+            if return_type is not str:
                 # Some models will output text other than the JSON response
                 # Best way to find the JSON alone would be to specifically get everything from the { to the }
-                first_brace = text_response.find("{")
-                first_bracket = text_response.find("[")
-                if first_bracket >= 0 and (first_brace < 0 or first_bracket < first_brace):
-                    text_response = text_response[first_bracket:text_response.rfind("]") + 1]
-                else:
+                if return_type is list:
+                    text_response = text_response[text_response.find("["):text_response.rfind("]") + 1]
+                elif return_type is dict:
                     text_response = text_response[text_response.find("{"):text_response.rfind("}") + 1]
 
                 if not text_response:
@@ -90,7 +88,7 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    async def chat_completion(self, messages: List[Message], model: str, temperature: float, max_tokens: int, system_prompt: str) -> str:
+    async def chat_completion(self, messages: List[Message], model: str, temperature: float, max_tokens: int, system_prompt: str, return_type: type) -> str:
         """
         Send a message to the model and get a response.
         """
@@ -102,7 +100,7 @@ class OllamaModel(Model):
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
 
     @staticmethod
-    async def chat_completion(messages: List[Message], model: str, temperature: float, max_tokens: int, system_prompt: str) -> Tuple[str, List[Dict[str, str]]]:
+    async def chat_completion(messages: List[Message], model: str, temperature: float, max_tokens: int, system_prompt: str, return_type: type) -> Tuple[str, List[Dict[str, str]]]:
         messages = [{"role": message.role.value, "content": message.content} for message in messages if message.role != Role.SYSTEM]
         if system_prompt:
             messages.insert(0, {"role": "system", "content": system_prompt})
@@ -168,9 +166,19 @@ class AnthropicModel(Model):
             encoded["content"] = message.content
         return encoded
 
-    async def chat_completion(self, messages=[], model='claude-3-haiku-20240307', temperature=0.0, max_tokens=1024, system_prompt=""):
+    async def chat_completion(self, messages=[], model='claude-3-haiku-20240307', temperature=0.0, max_tokens=1024, system_prompt="", return_type=str):
         # Check if the first message is a system message - if it is, we need to not pass it to Anthropic
         clean_messages = [await self.encode_message(message) for message in messages if message.role != Role.SYSTEM]
+
+        # Prefill to increase changes of generating the right type
+        prefill = None
+        if return_type is dict:
+            prefill = '{'
+        elif return_type is list:
+            prefill = '['
+
+        if prefill is not None:
+            clean_messages.append({"role": "assistant", "content": prefill})
 
         try:
             chat_completion = await self.client.messages.create(
@@ -181,7 +189,7 @@ class AnthropicModel(Model):
                 messages=clean_messages
             )
 
-            text_response = chat_completion.content[0].text
+            text_response = prefill + chat_completion.content[0].text
             return text_response
 
         except Exception as e:
@@ -217,7 +225,7 @@ class OpenAIModel(Model):
             encoded["content"] = message.content
         return encoded
 
-    async def chat_completion(self, messages=[], model='gpt-4o-mini-2024-07-18', temperature=0.0, max_tokens=1024, system_prompt=""):
+    async def chat_completion(self, messages=[], model='gpt-4o-mini-2024-07-18', temperature=0.0, max_tokens=1024, system_prompt="", return_type=str):
         messages = [self.encode_message(message) for message in messages if message.role != Role.SYSTEM]
         if system_prompt:
             messages.insert(0, {"role": "system", "content": system_prompt})
@@ -256,7 +264,7 @@ class OpenRouterModel(Model):
             api_key=OR_API_KEY
         )
 
-    async def chat_completion(self, messages=[], model='meta-llama/llama-3.1-405b-instruct', temperature=0.0, max_tokens=1024, system_prompt=""):
+    async def chat_completion(self, messages=[], model='meta-llama/llama-3.1-405b-instruct', temperature=0.0, max_tokens=1024, system_prompt="", return_type=str):
         messages = [{"role": message.role.value, "content": message.content} for message in messages if message.role != Role.SYSTEM]
         if system_prompt:
             messages.insert(0, {"role": "system", "content": system_prompt})
@@ -292,38 +300,26 @@ class GeminiModel(Model):
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
         genai.configure(api_key=GEMINI_API_KEY)
-        generation_config = {
-            "temperature": temperature,
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": max_tokens,
-            "response_mime_type": "text/plain",
-        }
-        self.client = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config=generation_config,
+
+    async def chat_completion(self, messages=[], model='gemini-2.0-flash-exp', temperature=0.0, max_tokens=1024, system_prompt="", return_type=str):
+        import google.generativeai as genai
+        history = [{"role": "model" if message.role == Role.ASSISTANT else "user", "parts": [message.content]} for message in messages[:-1] if message.role != Role.SYSTEM]
+
+        # Need to recreate the model with the system prompt as the system instruction
+        client = genai.GenerativeModel(
+            model_name=model,
+            generation_config={
+                "temperature": temperature,
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_output_tokens": max_tokens,
+                "response_mime_type": "text/plain" if return_type is str or "thinking" in model else "application/json",
+            },
             system_instruction=system_prompt
         )
 
-    async def chat_completion(self, messages=[], model='gemini-2.0-flash-exp', temperature=0.0, max_tokens=1024, system_prompt=""):
-        import google.generativeai as genai
-        history = [{"role": "model" if message.role.value == "assistant" else "user", "parts": [message.content]} for message in messages[:-1] if message.role != Role.SYSTEM]
-        if system_prompt != "" and system_prompt != None:
-            # Need to recreate the model with the system prompt as the system instruction
-            self.client = genai.GenerativeModel(
-                model_name=model,
-                generation_config={
-                    "temperature": temperature,
-                    "top_p": 0.95,
-                    "top_k": 40,
-                    "max_output_tokens": max_tokens,
-                    "response_mime_type": "text/plain",
-                },
-                system_instruction=system_prompt
-            )
-
         try:
-            chat_session = self.client.start_chat(history=history)
+            chat_session = client.start_chat(history=history)
             response = await chat_session.send_message_async(messages[-1].content)
             text_response = response.text
             return text_response

@@ -65,7 +65,7 @@ class LongTermMemoryPlugin(Plugin):
 
         prompt = f"SYSTEM: Respond with a JSON list (and nothing else) containing the IDs of up to {self.max_active_memories} of the long-term memories that are most relevant to the current conversation. If none are relevant, respond with an empty list."
 
-        result = await session.isolated_query(prompt, format_prompt=extra_prompt, as_json=True)
+        result = await session.isolated_query(prompt, format_prompt=extra_prompt, return_type=list)
         if isinstance(result, dict):
             if 'relevant_memories' in result:
                 result = result['relevant_memories']
@@ -73,7 +73,7 @@ class LongTermMemoryPlugin(Plugin):
                 result = next(iter(result.values()))
 
         self.active_memories.clear()
-        for mem_id in result:
+        for mem_id in result or ():
             if isinstance(mem_id, dict):
                 mem_id = mem_id.get("ID") or mem_id["id"]
 

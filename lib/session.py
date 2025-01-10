@@ -226,14 +226,14 @@ class Session:
                     break
                 user_messages.insert(0, user_message)
 
-            data = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, as_json=True)
+            data = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, return_type=dict)
 
             self.message_history[-1].dump(self.messages_file)
             self.messages_file.flush()
 
         return AssistantResponse(self, data, user_messages)
 
-    async def isolated_query(self, query, attachments=[], format_prompt=None, as_json=False, model=None):
+    async def isolated_query(self, query, attachments=[], format_prompt=None, return_type=str, model=None):
         # Runs an isolated query on this session.
         system_prompt = self.message_history[0].content
 
@@ -248,7 +248,7 @@ class Session:
 
         if model is None:
             model = self.assistant.model
-        response = await model.query(messages, system_prompt=system_prompt, as_json=as_json)
+        response = await model.query(messages, system_prompt=system_prompt, return_type=return_type)
 
         print("Response:", response)
         return response
