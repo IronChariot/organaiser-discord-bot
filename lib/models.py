@@ -288,7 +288,7 @@ class GeminiModel(Model):
         import google.generativeai as genai
         if model_name == "gemini-2.0-flash":
             model_name = "gemini-2.0-flash-exp"
-        elif model_name == "gemini-2.0-flash-thinking":
+        elif model_name in ("gemini-2.0-flash-thinking", "gemini-2.0-flash-thinking-exp"):
             model_name = "gemini-2.0-flash-thinking-exp-1219"
         elif model_name == "gemini-1.5-flash":
             pass
