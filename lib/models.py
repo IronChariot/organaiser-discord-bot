@@ -171,13 +171,13 @@ class AnthropicModel(Model):
         clean_messages = [await self.encode_message(message) for message in messages if message.role != Role.SYSTEM]
 
         # Prefill to increase changes of generating the right type
-        prefill = None
+        prefill = ''
         if return_type is dict:
             prefill = '{'
         elif return_type is list:
             prefill = '['
 
-        if prefill is not None:
+        if prefill:
             clean_messages.append({"role": "assistant", "content": prefill})
 
         try:
