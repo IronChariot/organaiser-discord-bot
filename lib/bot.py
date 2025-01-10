@@ -200,6 +200,7 @@ class Bot(discord.Client):
 
             except Exception as ex:
                 await self.write_bug_report(ex)
+                await asyncio.sleep(10)
 
     async def prompt_response(self):
         """Prompts a response from the assistant and handles it."""
