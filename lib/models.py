@@ -6,12 +6,19 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Tuple, Optional
 import anthropic
+from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
+from anthropic.types.messages.batch_create_params import Request
 from openai import AsyncOpenAI
 import os
 from datetime import datetime, timezone
 import asyncio
+from contextvars import ContextVar
 
 from .msgtypes import Role, Message, AssistantMessage, Attachment
+
+# Time in seconds between checking whether a batch is done.
+BATCH_CHECK_DELAY = 60.0
+BATCH_CHECK_BACKOFF = 1.5
 
 
 class Model(ABC):
@@ -21,6 +28,10 @@ class Model(ABC):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.logger = logger or logging.getLogger(__name__)
+
+    def batch(self, *calls):
+        # Default implementation just runs everything one by one
+        return asyncio.gather(*calls)
 
     async def query(self, messages: List[Message], system_prompt=None, validate_func=None, return_type=str) -> str:
         temperature = self.temperature
@@ -160,6 +171,7 @@ class AnthropicModel(Model):
             print("Invalid model specified. Defaulting to claude-3-5-sonnet-20241022.")
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         self.client = anthropic.AsyncAnthropic()
+        self.batcher = ContextVar('batcher', default=None)
 
     async def encode_message(self, message):
         encoded = {"role": message.role.value}
@@ -194,7 +206,7 @@ class AnthropicModel(Model):
             clean_messages.append({"role": "assistant", "content": prefill})
 
         try:
-            chat_completion = await self.client.messages.create(
+            chat_completion = await self._do_request(
                 system=system_prompt,
                 model=model,
                 max_tokens=max_tokens,
@@ -208,6 +220,74 @@ class AnthropicModel(Model):
         except Exception as e:
             print("Error: " + str(e))
             return "Error querying the LLM: " + str(e)
+
+    def _do_request(self, **kwargs):
+        batcher = self.batcher.get()
+        if batcher is not None:
+            return batcher(MessageCreateParamsNonStreaming(**kwargs))
+        else:
+            return self.client.messages.create(**kwargs)
+
+    async def batch(self, *calls):
+        """Like asyncio.gather, but any queries are pooled together into a
+        batch.  Returns a list of results when the batch is completed."""
+
+        def collect_request(custom_id, coro):
+            # Triggered when a request has been made
+            request_fut = asyncio.Future()
+
+            def batcher(params):
+                request = Request(custom_id=custom_id, params=params)
+                result_fut = asyncio.Future()
+                request_fut.set_result((request, result_fut))
+                self.batcher.set(None)
+                return result_fut
+
+            async def wrapper():
+                try:
+                    self.batcher.set(batcher)
+                    return await coro
+                finally:
+                    # Make sure the result fut is flagged even if no request was
+                    # added, or the caller will end up waiting indefinitely
+                    if not request_fut.done():
+                        request_fut.set_result((None, None))
+
+            return request_fut, asyncio.create_task(wrapper())
+
+        requests = []
+        result_futs = {}
+        tasks = []
+        for i, coro in enumerate(calls):
+            custom_id = str(i)
+            request_fut, task = collect_request(custom_id, coro)
+            request, result_fut = await request_fut
+            if request is not None:
+                requests.append(request)
+                result_futs[custom_id] = result_fut
+
+            tasks.append(task)
+
+        batch = await self.client.messages.batches.create(requests=requests)
+        batch_id = batch.id
+        print(f"Initiated batch {batch_id}")
+
+        delay = BATCH_CHECK_DELAY
+        try:
+            while batch.processing_status != 'ended':
+                await asyncio.sleep(delay)
+                delay *= BATCH_CHECK_BACKOFF
+                batch = await self.client.messages.batches.retrieve(batch_id)
+
+        finally:
+            if batch.processing_status not in ('ended', 'canceling'):
+                print(f"Cancelling batch {batch_id}")
+                await self.client.messages.batches.cancel(batch_id)
+
+        async for response in await self.client.messages.batches.results(batch_id):
+            result_futs[response.custom_id].set_result(response.result.message)
+
+        return await asyncio.gather(*tasks)
 
 
 class OpenAIModel(Model):

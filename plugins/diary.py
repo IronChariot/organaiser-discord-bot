@@ -31,7 +31,7 @@ class DiaryPlugin(Plugin):
     async def _write_diary_entry(self, session, overwrite=True):
         path = self._get_entry_path(session)
 
-        response = await session.isolated_query("SYSTEM: " + self.prompt)
+        response, = await self.assistant.model.batch(session.isolated_query("SYSTEM: " + self.prompt))
         path.parent.mkdir(exist_ok=True)
         with open(path, 'w') as fh:
             fh.write(response)
