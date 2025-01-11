@@ -227,11 +227,14 @@ class Session:
                 user_messages.insert(0, user_message)
 
             data = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, return_type=dict)
+            thought = None
+            if self.message_history[-1].role == Role.ASSISTANT:
+                thought = self.message_history[-1].thought
 
             self.message_history[-1].dump(self.messages_file)
             self.messages_file.flush()
 
-        return AssistantResponse(self, data, user_messages)
+        return AssistantResponse(self, data, user_messages, thought=thought)
 
     async def isolated_query(self, query, attachments=[], format_prompt=None, return_type=str, model=None):
         # Runs an isolated query on this session.

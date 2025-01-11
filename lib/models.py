@@ -34,42 +34,55 @@ class Model(ABC):
                 self.logger.info(f"Querying model (Attempt {attempt + 1}, Temperature: {temperature})")
             self.logger.info(f"User message: {messages[-1].content}")
 
-            text_response = await self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt, return_type)
-            response_time = datetime.now(tz=timezone.utc)
-            self.logger.info(f"Model response: {text_response}")
+            message = await self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt, return_type)
+            self.logger.info(f"Model response: {message}")
+
+            if message and not message.timestamp:
+                message.timestamp = datetime.now(tz=timezone.utc)
 
             valid = True
             if return_type is not str:
                 # Some models will output text other than the JSON response
                 # Best way to find the JSON alone would be to specifically get everything from the { to the }
-                if return_type is list:
-                    text_response = text_response[text_response.find("["):text_response.rfind("]") + 1]
-                elif return_type is dict:
-                    text_response = text_response[text_response.find("{"):text_response.rfind("}") + 1]
+                if return_type is list and "[" in message.content:
+                    begin = message.content.find("[")
+                    end = message.content.rfind("]")
+                    if begin < 0 or end < begin:
+                        valid = False
+                    else:
+                        message.content = message.content[begin:end + 1]
 
-                if not text_response:
+                elif return_type is dict and "{" in message.content:
+                    begin = message.content.find("{")
+                    end = message.content.rfind("}")
+                    if begin < 0 or end < begin:
+                        valid = False
+                    else:
+                        message.content = message.content[begin:end + 1]
+
+                if not message.content:
                     response = None
                 else:
                     try:
-                        response = json.loads(text_response, strict=False)
+                        response = json.loads(message.content, strict=False)
                     except json.JSONDecodeError:
                         # Remove comments
-                        if '//' in text_response:
-                            text_response = re.sub(r'([\[\]\{\},"])\s*//.*$', '\\1', text_response, flags=re.MULTILINE)
+                        if '//' in message.content:
+                            message.content = re.sub(r'([\[\]\{\},"])\s*//.*$', '\\1', message.content, flags=re.MULTILINE)
                             try:
-                                response = json.loads(text_response, strict=False)
+                                response = json.loads(message.content, strict=False)
                             except json.JSONDecodeError:
                                 valid = False
                         else:
                             valid = False
             else:
-                response = text_response
+                response = message.content
 
             if valid and validate_func is not None and not validate_func(response):
                 valid = False
 
             if valid:
-                messages.append(AssistantMessage(text_response, timestamp=response_time))
+                messages.append(message)
                 return response
 
             temperature = min(temperature + 0.1, 1.0)
@@ -127,7 +140,7 @@ class OllamaModel(Model):
         else:
             text_response = f"Error: {response.status_code}"
 
-        return text_response
+        return AssistantMessage(text_response)
 
 
 class AnthropicModel(Model):
@@ -239,7 +252,7 @@ class OpenAIModel(Model):
             )
 
             text_response = chat_completion.choices[0].message.content
-            return text_response
+            return AssistantMessage(text_response)
 
         except Exception as e:
             print("Error: " + str(e))
@@ -277,7 +290,7 @@ class OpenRouterModel(Model):
                 max_tokens=max_tokens
             )
             text_response = chat_completion.choices[0].message.content
-            return text_response
+            return AssistantMessage(text_response)
 
         except Exception as e:
             print("Error: " + str(e))
@@ -325,7 +338,7 @@ class GeminiModel(Model):
 
     async def chat_completion(self, messages=[], model='gemini-2.0-flash-exp', temperature=0.0, max_tokens=1024, system_prompt="", return_type=str):
         import google.generativeai as genai
-        history = [await self.encode_message(message) for message in messages[:-1] if message.role != Role.SYSTEM]
+        history = [await self.encode_message(message) for message in messages[:-1] if message.role != Role.SYSTEM and (message.content or message.attachments)]
 
         # Need to recreate the model with the system prompt as the system instruction
         client = genai.GenerativeModel(
@@ -343,8 +356,30 @@ class GeminiModel(Model):
         try:
             chat_session = client.start_chat(history=history)
             response = await chat_session.send_message_async(await self.encode_parts(messages[-1]))
-            text_response = response.text
-            return text_response
+
+            if len(response.parts) <= 1:
+                return AssistantMessage(response.text)
+
+            if return_type is dict or return_type is list:
+                # Identify which part is JSON, the rest must be thought
+                thoughts = []
+                content = None
+                for part in response.parts:
+                    text = part.text.strip()
+                    if text.lstrip()[0] in '{[`':
+                        content = text
+                    else:
+                        thoughts.append(text)
+
+                if not content:
+                    return "No JSON found in LLM response."
+
+                thought = '\n'.join(thoughts).strip()
+                return AssistantMessage(content, thought=thought)
+
+            # Assume the first part is thoughts, the rest content
+            content = ''.join(part.text for part in response.parts[1:] if "text" in part)
+            return AssistantMessage(content, thought=response.parts[0].text)
 
         except Exception as e:
             print("Error: " + str(e))
@@ -385,7 +420,7 @@ class DeepSeekModel(Model):
             )
 
             text_response = chat_completion.choices[0].message.content
-            return text_response
+            return AssistantMessage(text_response)
 
         except Exception as e:
             print("Error: " + str(e))

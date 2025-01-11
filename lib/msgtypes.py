@@ -51,14 +51,15 @@ class Attachment:
 
 
 class Message:
-    __slots__ = 'content', 'id', 'attachments', 'timestamp'
+    __slots__ = 'content', 'id', 'attachments', 'timestamp', 'thought'
 
-    def __init__(self, content: str, id=None, timestamp=None):
+    def __init__(self, content: str, id=None, timestamp=None, thought=None):
         assert hasattr(self, 'role')
         self.content = content
         self.id = id
         self.attachments = []
         self.timestamp = timestamp
+        self.thought = thought
 
     def attach(self, url, content_type):
         self.attachments.append(Attachment(url, content_type))
@@ -74,6 +75,8 @@ class Message:
             obj["timestamp"] = int(self.timestamp.timestamp())
         if self.attachments:
             obj["attachments"] = [{"url": attach.url, "content_type": attach.content_type} for attach in self.attachments]
+        if self.thought:
+            obj["thought"] = self.thought
 
         file.write(json.dumps(obj) + "\n")
 
@@ -117,6 +120,9 @@ def parse_message(string):
 
     else:
         raise RuntimeError("encountered unexpected role")
+
+    if obj.get("thought"):
+        msg.thought = obj["thought"]
 
     if obj.get("timestamp"):
         msg.timestamp = datetime.fromtimestamp(obj["timestamp"], tz=timezone.utc)

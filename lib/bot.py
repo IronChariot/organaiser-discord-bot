@@ -251,6 +251,9 @@ class Bot(discord.Client):
         if self.log_channel:
             log_message = format_json_md(response.raw_data)
 
+            if response.thought:
+                log_message = f'*{response.thought}*\n{log_message}'
+
             if response.user_messages:
                 quoted_message = '\n> '.join(line for um in response.user_messages if um.content for line in um.content.splitlines())
                 log_message = f'> {quoted_message}\n\n{log_message}'
