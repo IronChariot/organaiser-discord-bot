@@ -1,7 +1,9 @@
 from lib.plugin import Plugin, hook, system_prompt
+from lib.msgtypes import Channel
 from lib import models
 
 import json
+import asyncio
 from datetime import date
 from dataclasses import dataclass
 
@@ -83,6 +85,15 @@ class LongTermMemoryPlugin(Plugin):
             memory = self.memories_by_id.get(mem_id)
             if memory:
                 self.active_memories.add(memory)
+
+        if not self.active_memories:
+            asyncio.create_task(self.send_message('No memories activated.', channel=Channel.LOG))
+        else:
+            str_memories = []
+            for memory in self.active_memories:
+                str_memories.append(f' - M{memory.id:04}: {memory.title}')
+            str_memories = '\n'.join(str_memories)
+            asyncio.create_task(self.send_message(f'Active memories: \n{str_memories}', channel=Channel.LOG))
 
     @hook('post_session_end')
     async def on_post_session_end(self, session):
