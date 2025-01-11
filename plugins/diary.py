@@ -33,6 +33,10 @@ class DiaryPlugin(Plugin):
 
         response, = await self.assistant.model.batch(session.isolated_query("SYSTEM: " + self.prompt))
         path.parent.mkdir(exist_ok=True)
+
+        if response.startswith('```markdown\n') or response.startswith('```md\n'):
+            response = response.split('\n', 1)[1].rstrip('`\n')
+
         with open(path, 'w') as fh:
             fh.write(response)
 
