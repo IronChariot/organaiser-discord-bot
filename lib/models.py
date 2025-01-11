@@ -203,7 +203,7 @@ class AnthropicModel(Model):
             )
 
             text_response = prefill + chat_completion.content[0].text
-            return text_response
+            return AssistantMessage(text_response)
 
         except Exception as e:
             print("Error: " + str(e))
