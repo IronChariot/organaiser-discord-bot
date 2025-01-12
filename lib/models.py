@@ -97,7 +97,7 @@ class Model(ABC):
                 return response
 
             temperature = min(temperature + 0.1, 1.0)
-            self.logger.warning(f"Response: {text_response}")
+            self.logger.warning(f"Response: {message.content}")
             self.logger.warning(f"Invalid response. Increasing temperature to {temperature}")
             await asyncio.sleep(0.25)
 
