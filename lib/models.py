@@ -78,8 +78,8 @@ class Model(ABC):
                         response = json.loads(message.content, strict=False)
                     except json.JSONDecodeError:
                         # Remove comments
-                        if '//' in message.content:
-                            message.content = re.sub(r'([\[\]\{\},"])\s*//.*$', '\\1', message.content, flags=re.MULTILINE)
+                        if '//' in message.content or '#' in message.content:
+                            message.content = re.sub(r'([\[\]\{\},"])\s*(//|#).*$', '\\1', message.content, flags=re.MULTILINE)
                             try:
                                 response = json.loads(message.content, strict=False)
                             except json.JSONDecodeError:
