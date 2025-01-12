@@ -22,16 +22,21 @@ class DiaryPlugin(Plugin):
     async def on_post_session_end(self, session):
         path = self._get_entry_path(session)
         if not path.exists():
-            entry = await self._write_diary_entry(session)
+            entry = await self._write_diary_entry(session, batch=True)
             await self.send_message(entry, channel=Channel.DIARY)
 
     def _get_entry_path(self, session):
         return DIARIES_DIR / f'{self.assistant.id}-{session.date.isoformat()}.txt'
 
-    async def _write_diary_entry(self, session, overwrite=True):
+    async def _write_diary_entry(self, session, overwrite=True, batch=False):
         path = self._get_entry_path(session)
 
-        response, = await self.assistant.model.batch(session.isolated_query("SYSTEM: " + self.prompt))
+        fut = session.isolated_query("SYSTEM: " + self.prompt)
+        if batch:
+            response, = await self.assistant.model.batch(fut)
+        else:
+            response = await fut
+
         path.parent.mkdir(exist_ok=True)
 
         if response.startswith('```markdown\n') or response.startswith('```md\n'):
