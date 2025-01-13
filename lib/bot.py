@@ -414,6 +414,9 @@ class Bot(discord.Client):
         self.query_channel = discord.utils.get(all_channels, name=query_channel_name) if query_channel_name else None
         self.bugs_channel = discord.utils.get(all_channels, name=bugs_channel_name) if bugs_channel_name else None
 
+        # Run the on_ready hooks
+        await asyncio.gather(*self.assistant.call_hooks('discord_ready', self))
+
         # Do this in the background, it takes a long time
         if self.chat_channel:
             guild = self.chat_channel.guild
@@ -590,6 +593,8 @@ class Bot(discord.Client):
 
             for func in plugin._discord_commands:
                 self._register_command(func)
+
+        await asyncio.gather(*self.assistant.call_hooks('discord_setup', self))
 
         # Load the session
         self.session = await self.assistant.load_session(self.session_date)

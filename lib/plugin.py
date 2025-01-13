@@ -15,6 +15,8 @@ HOOK_NAMES = (
     'configure',
     'pre_query_assistant_response',
     'post_session_end',
+    'discord_setup',
+    'discord_ready',
 )
 
 class Plugin:
@@ -88,16 +90,17 @@ class Plugin:
 
     def schedule(self, when, coro, /):
         """Schedules the given coroutine to run at the specified datetime.
-        If when is in the past, it will be scheduled right away.
+        If when is in the past or None, it will be scheduled right away.
         Returns an object that can be cancelled or awaited."""
 
-        assert when.tzinfo is not None and when.tzinfo.utcoffset(when) is not None
+        assert when is None or when.tzinfo is not None and when.tzinfo.utcoffset(when) is not None
         assert inspect.iscoroutine(coro)
 
         async def wait_and_run(when, coro):
-            begin_time = datetime.now(tz=when.tzinfo)
-            if when > begin_time:
-                await asyncio.sleep((when - begin_time).total_seconds())
+            if when is not None:
+                begin_time = datetime.now(tz=when.tzinfo)
+                if when > begin_time:
+                    await asyncio.sleep((when - begin_time).total_seconds())
 
             try:
                 await asyncio.shield(coro)

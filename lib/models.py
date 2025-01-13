@@ -29,9 +29,9 @@ class Model(ABC):
         self.max_tokens = max_tokens
         self.logger = logger or logging.getLogger(__name__)
 
-    def batch(self, *calls):
+    async def batch(self, *calls):
         # Default implementation just runs everything one by one
-        return asyncio.gather(*calls)
+        return [await call for call in calls]
 
     async def query(self, messages: List[Message], system_prompt=None, validate_func=None, return_type=str) -> str:
         temperature = self.temperature
