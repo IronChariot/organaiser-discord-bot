@@ -1,4 +1,4 @@
-from lib.plugin import Plugin, hook, system_prompt
+from lib.plugin import Plugin, hook, system_prompt, discord_command
 from lib.msgtypes import Channel
 from lib import models
 
@@ -127,7 +127,7 @@ class LongTermMemoryPlugin(Plugin):
     async def on_post_session_end(self, session):
         self.schedule(None, self.update_memories(session))
 
-    async def update_memories(self, session):
+    async def update_memories(self, session, batch=True):
         print("Updating memories")
         extra_prompt = ''
 
@@ -173,7 +173,10 @@ class LongTermMemoryPlugin(Plugin):
             query = session.isolated_query(f"SYSTEM: Now follows the full definition of memory M{update_id:04d}. Return this same JSON object, but appropriately modified if you have learned new information about this topic. Also include a \"commit_message\" string in that same object explaining what has changed. Remember, the memory content should be removed from time, make sure that it still makes sense when read on any date in the future, and important events should include a date in the text.\n{old_json}", format_prompt=extra_prompt, return_type=dict, model=self.update_model)
             update_queries.append(query)
 
-        results = await session.assistant.model.batch(*update_queries)
+        if batch:
+            results = await session.assistant.model.batch(*update_queries)
+        else:
+            results = [await query for query in update_queries]
 
         for memory, result in zip(update_memories, results):
             if 'title' in result:
@@ -198,7 +201,10 @@ class LongTermMemoryPlugin(Plugin):
             updated_msg = ''
 
         query = session.isolated_query(f"SYSTEM:{updated_msg} Besides that, are there any new things, unrelated to these or any other existing memories, that you wish to commit to long term memory for later recall, for example detailing the current state of a project or pursuit, or a particularly significant conversation? Return a JSON list of memories, each memory being a JSON object with a \"title\" key, a brief \"summary\", the full \"content\" (be detailed!) and a list of \"labels\". Memories are not for diary entries, so do not create a memory just describing the day or energy patterns. It's okay to not create any memories if there are no new things unrelated to existing memories. If you mention particular events, include a date on which that event occurred in the text. The memory content should be removed from time, make sure that it still makes sense when read on any date in the future. Be very, very thorough to make sure you've included all the important details that were brought up today regarding this topic.", format_prompt=extra_prompt, return_type=list, model=self.update_model)
-        new_memories, = await session.assistant.model.batch(query)
+        if batch:
+            new_memories, = await session.assistant.model.batch(query)
+        else:
+            new_memories = await query
         if not new_memories:
             new_memories = []
         elif isinstance(new_memories, dict):
@@ -225,7 +231,18 @@ class LongTermMemoryPlugin(Plugin):
             self.memories_by_id[memory.id] = memory
             await self.update_memory(memory)
 
-        print(f"Finished updating memories (added {len(new_memories)} new, updated {update_memories})")
+        print(f"Finished updating memories (added {len(new_memories)} new, updated {len(update_memories)})")
+        return len(new_memories), len(update_memories)
+
+    @discord_command(name="update_ltm",
+                     description="Update long-term memories immediately.")
+    async def on_discord_command(self, bot, interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        session = bot.session
+        new_count, updated_count = await self.update_memories(session, batch=False)
+
+        await interaction.followup.send(f'Added {new_count}, updated {updated_count} memories.', ephemeral=True)
 
     @hook('discord_setup')
     async def on_discord_setup(self, client):
