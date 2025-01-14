@@ -232,6 +232,9 @@ class AnthropicModel(Model):
         """Like asyncio.gather, but any queries are pooled together into a
         batch.  Returns a list of results when the batch is completed."""
 
+        if len(calls) == 0:
+            return []
+
         def collect_request(custom_id, coro):
             # Triggered when a request has been made
             request_fut = asyncio.Future()
