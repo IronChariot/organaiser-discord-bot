@@ -339,7 +339,7 @@ class OpenAIModel(Model):
 
         except Exception as e:
             print("Error: " + str(e))
-            return "Error querying the LLM: " + str(e)
+            return AssistantMessage("Error querying the LLM: " + str(e))
 
 
 class OpenRouterModel(Model):
@@ -377,7 +377,8 @@ class OpenRouterModel(Model):
 
         except Exception as e:
             print("Error: " + str(e))
-            return "Error querying the LLM: " + str(e)
+            return AssistantMessage("Error querying the LLM: " + str(e))
+
 
 class GeminiModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "You are a helpful assistant.", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
@@ -466,8 +467,9 @@ class GeminiModel(Model):
 
         except Exception as e:
             print("Error: " + str(e))
-            return "Error querying the LLM: " + str(e)
-        
+            return AssistantMessage("Error querying the LLM: " + str(e))
+
+
 class DeepSeekModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
         model_name = "deepseek-chat"  # $0.14 / 1M tokens Input, $0.28/1M tokens Output
@@ -507,7 +509,7 @@ class DeepSeekModel(Model):
 
         except Exception as e:
             print("Error: " + str(e))
-            return "Error querying the LLM: " + str(e)
+            return AssistantMessage("Error querying the LLM: " + str(e))
 
 
 def create(model_name):
