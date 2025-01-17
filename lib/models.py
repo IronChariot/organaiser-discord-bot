@@ -219,7 +219,7 @@ class AnthropicModel(Model):
 
         except Exception as e:
             print("Error: " + str(e))
-            return "Error querying the LLM: " + str(e)
+            return AssistantMessage("Error querying the LLM: " + str(e))
 
     def _do_request(self, **kwargs):
         batcher = self.batcher.get()
