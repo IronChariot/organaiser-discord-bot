@@ -89,12 +89,28 @@ class Message:
     def __repr__(self):
         return str(self)
 
+    def reduce(self):
+        return self
+
 
 class AssistantMessage(Message):
     role = Role.ASSISTANT
 
     def is_summary(self):
         return self.content.startswith("~~~")
+
+    def reduce(self):
+        try:
+            content = self.parse_json()
+            content.pop("impression", None)
+            content.pop("intentions", None)
+            content.pop("prompt_after", None)
+            content = json.dumps(content)
+        except json.JSONDecodeError:
+            return self
+
+        # Also strip thought
+        return AssistantMessage(content, timestamp=self.timestamp, id=self.id)
 
 
 class SystemMessage(Message):
@@ -103,6 +119,12 @@ class SystemMessage(Message):
 
 class UserMessage(Message):
     role = Role.USER
+
+    def reduce(self):
+        if not self.attachments:
+            return self
+
+        return UserMessage(content, timestamp=self.timestamp, id=self.id)
 
 
 def parse_message(string):

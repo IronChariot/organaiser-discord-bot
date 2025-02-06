@@ -230,7 +230,7 @@ class Assistant:
         session_path.parent.mkdir(exist_ok=True)
 
         session_file = session_path.open('w')
-        session.message_history[0].dump(session_file)
+        session.system_message.dump(session_file)
         session_file.flush()
 
         session.messages_file = session_file

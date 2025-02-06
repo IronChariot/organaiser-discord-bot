@@ -36,7 +36,7 @@ class EditSystemPromptModal(discord.ui.Modal, title='Edit System Prompt for Toda
         self.inputs = []
         super().__init__()
 
-        for part in split_message(session.message_history[0].content, 4000):
+        for part in split_message(session.system_message.content, 4000):
             input = discord.ui.TextInput(
                 label='Prompt',
                 style=discord.TextStyle.paragraph,
@@ -54,7 +54,7 @@ class EditSystemPromptModal(discord.ui.Modal, title='Edit System Prompt for Toda
         new_prompt = '\n'.join(input.value for input in self.inputs).strip()
 
         async with self.session.context_lock:
-            self.session.message_history[0].content = new_prompt
+            self.session.system_message.content = new_prompt
             self.session._rewrite_message_file()
 
         await interaction.response.send_message(f'Updated system prompt.', ephemeral=True, silent=True)

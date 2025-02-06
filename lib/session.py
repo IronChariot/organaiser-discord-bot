@@ -25,7 +25,9 @@ class Session:
         self.assistant = assistant
         self.initial_system_prompt = system_prompt
         if self.initial_system_prompt:
-            self.message_history.append(SystemMessage(self.initial_system_prompt))
+            system_message = SystemMessage(self.initial_system_prompt)
+            self.message_history.append(system_message)
+
         self.context_lock = asyncio.Lock()
 
         self.standard_format_prompt = FORMAT_PROMPT
@@ -43,7 +45,12 @@ class Session:
         if self.assistant.rollover < time(12) or not self.assistant.rollover:
             date += timedelta(days=1)
 
-        return datetime.combine(date, self.assistant.rollover, tzinfo=self.assistant.timezone)
+        return datetime.combine(date, self.assistant.rollover,
+                                tzinfo=self.assistant.timezone)
+
+    @property
+    def system_message(self):
+        return self.message_history[0]
 
     @property
     def last_message(self):
@@ -182,28 +189,29 @@ class Session:
 
     def _rewrite_message_file(self):
         """Rewrites the entire message file with the current message history."""
-        if self.messages_file:
-            self.messages_file.seek(0)
-            self.messages_file.truncate()
+        file = self.messages_file
+        if file:
+            file.seek(0)
+            file.truncate()
             for message in self.message_history:
-                message.dump(self.messages_file)
-            self.messages_file.flush()
+                message.dump(file)
+            file.flush()
 
-    async def chat(self, message: UserMessage) -> AssistantResponse:
+    async def chat(self, message: UserMessage, full_context: bool = False) -> AssistantResponse:
         """User or system sends a message.  Returns assistant response."""
 
         self.last_activity = datetime.now()
 
         await self.push_message(message)
-        return await self.query_assistant_response()
+        return await self.query_assistant_response(full_context=full_context)
 
-    async def query_assistant_response(self) -> Optional[AssistantResponse]:
+    async def query_assistant_response(self, full_context: bool = False) -> Optional[AssistantResponse]:
         """Asks the assistant to respond to the current message history,
         if there are any user messages to respond to, or None."""
 
         await asyncio.gather(*self.assistant.call_hooks('pre_query_assistant_response', self))
 
-        system_prompt = self.message_history[0].content + \
+        system_prompt = self.system_message.content + \
                         "\n\n" + \
                         self.standard_format_prompt
 
@@ -226,17 +234,24 @@ class Session:
                     break
                 user_messages.insert(0, user_message)
 
-            data = await self.assistant.model.query(self.message_history, system_prompt=system_prompt, return_type=dict)
-            thought = None
-            if self.message_history[-1].role == Role.ASSISTANT:
-                thought = self.message_history[-1].thought
+            if full_context:
+                messages = self.message_history[:]
+            else:
+                messages = [message.reduce() for message in self.message_history[:-5]] + self.message_history[-5:]
 
+            data = await self.assistant.model.query(messages, system_prompt=system_prompt, return_type=dict)
+            thought = None
+            assert messages[-1].role == Role.ASSISTANT
+            thought = messages[-1].thought
+
+            self.message_history.append(messages[-1])
             self.message_history[-1].dump(self.messages_file)
             self.messages_file.flush()
 
         return AssistantResponse(self, data, user_messages, thought=thought)
 
-    async def isolated_query(self, query, attachments=[], format_prompt=None, return_type=str, model=None):
+    async def isolated_query(self, query, attachments=[], *, format_prompt=None,
+                             return_type=str, model=None, full_context=True):
         # Runs an isolated query on this session.
         system_prompt = self.message_history[0].content
 
@@ -247,7 +262,12 @@ class Session:
 
         message = UserMessage(query)
         message.attachments[:] = attachments
-        messages = self.message_history + [message]
+
+        if full_context:
+            messages = self.message_history
+        else:
+            messages = [message.reduce() for message in self.message_history[:-5]] + self.message_history[-5:]
+        messages = messages + [message]
 
         if model is None:
             model = self.assistant.model
