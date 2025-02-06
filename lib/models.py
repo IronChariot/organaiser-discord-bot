@@ -450,7 +450,7 @@ class GeminiModel(Model):
                 content = None
                 for part in response.parts:
                     text = part.text.strip()
-                    if text.lstrip()[0] in '{[`':
+                    if text[0] in '{[`':
                         content = text
                     else:
                         thoughts.append(text)
@@ -461,9 +461,12 @@ class GeminiModel(Model):
                 thought = '\n'.join(thoughts).strip()
                 return AssistantMessage(content, thought=thought)
 
-            # Assume the first part is thoughts, the rest content
-            content = ''.join(part.text for part in response.parts[1:] if "text" in part)
-            return AssistantMessage(content, thought=response.parts[0].text)
+            if len(response.parts) > 1:
+                # Assume the first part is thoughts, the rest content
+                content = ''.join(part.text for part in response.parts[1:] if "text" in part)
+                return AssistantMessage(content, thought=response.parts[0].text)
+            else:
+                return AssistantMessage(response.parts[0].text)
 
         except Exception as e:
             print("Error: " + str(e))
