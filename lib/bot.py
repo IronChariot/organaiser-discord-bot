@@ -107,7 +107,6 @@ class Bot(discord.Client):
 
         # Check when the next check-in should be
         prompt_after = self.assistant.default_prompt_after
-        deadline = datetime.now(tz=timezone.utc) + timedelta(minutes=prompt_after)
         message = self.session.get_last_assistant_message()
         if message and message.timestamp:
             try:
@@ -118,6 +117,10 @@ class Bot(discord.Client):
             if isinstance(response, dict) and isinstance(response.get('prompt_after'), (float, int)):
                 prompt_after = int(response['prompt_after'])
                 deadline = message.timestamp + timedelta(minutes=prompt_after)
+            else:
+                deadline = datetime.now(tz=timezone.utc) + timedelta(minutes=prompt_after)
+        else:
+            deadline = None
 
         while True:
             # Wait for a new user message, or the prompt_after to time out,
@@ -126,7 +129,7 @@ class Bot(discord.Client):
             cur_time = datetime.now(tz=timezone.utc)
             if next_rollover < cur_time:
                 pass
-            elif deadline < cur_time:
+            elif deadline is not None and deadline < cur_time:
                 print("Next check-in OVERDUE by", cur_time - deadline)
             else:
                 if self.session.last_message.role == Role.USER:
@@ -136,10 +139,13 @@ class Bot(discord.Client):
                         seconds_left = (self.typing_timeout - cur_time).total_seconds()
                         if seconds_left > 0:
                             print(f"Waiting {seconds_left:.1f} more seconds since user is typing")
-                else:
+                elif deadline is not None:
                     # Nothing to respond to, wait for next prompt_after or rollover
                     print("Next check-in at", deadline)
                     seconds_left = (min(deadline, next_rollover) - cur_time).total_seconds()
+                else:
+                    # No next check-in, wait for rollover
+                    seconds_left = (next_rollover - cur_time).total_seconds()
 
                 try:
                     if seconds_left > 0:
@@ -168,9 +174,15 @@ class Bot(discord.Client):
                 cur_time = datetime.now(tz=timezone.utc)
                 if cur_time >= next_rollover:
                     await self.perform_rollover()
+
+                    # Skip prompt_after after rollover
+                    deadline = None
                     continue
 
-                if cur_time < deadline:
+                if deadline is None:
+                    print(f"Woke up spuriously without deadline.")
+                    continue
+                elif cur_time < deadline:
                     # What?  Apparently not?
                     print(f"Woke up spuriously with {deadline - cur_time} to go.")
                     continue
@@ -196,8 +208,8 @@ class Bot(discord.Client):
                     prompt_after = response.prompt_after
                 else:
                     prompt_after = self.assistant.default_prompt_after
-                deadline = self.session.last_message.timestamp + timedelta(minutes=prompt_after)
 
+                deadline = self.session.last_message.timestamp + timedelta(minutes=prompt_after)
             except Exception as ex:
                 await self.write_bug_report(ex)
                 await asyncio.sleep(10)
