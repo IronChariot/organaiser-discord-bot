@@ -124,7 +124,7 @@ class UserMessage(Message):
         if not self.attachments:
             return self
 
-        return UserMessage(content, timestamp=self.timestamp, id=self.id)
+        return UserMessage(self.content, timestamp=self.timestamp, id=self.id)
 
 
 def parse_message(string):
