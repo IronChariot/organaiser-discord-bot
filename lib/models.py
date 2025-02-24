@@ -158,7 +158,9 @@ class AnthropicModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
         if model_name == "claude-opus":
             model_name = "claude-3-opus-20240229" # $15/$75
-        elif model_name == "claude-sonnet":
+        elif model_name == "claude-sonnet" or model_name == "claude-3-7-sonnet":
+            model_name = "claude-3-7-sonnet-20250219" # $3/$15
+        elif model_name == "claude-3-5-sonnet":
             model_name = "claude-3-5-sonnet-20241022" # $3/$15
         elif model_name == "claude-haiku":
             model_name = "claude-3-5-haiku-20241022" # $1/$5
@@ -167,8 +169,8 @@ class AnthropicModel(Model):
         elif model_name == "claude-3-haiku":
             model_name = "claude-3-haiku-20240307"
         else: # Default to sonnet model
-            model_name = "claude-3-5-sonnet-20241022"
-            print("Invalid model specified. Defaulting to claude-3-5-sonnet-20241022.")
+            model_name = "claude-3-7-sonnet-20250219"
+            print(f"Invalid model specified. Defaulting to {model_name}.")
         super().__init__(model_name, system_prompt, temperature, max_tokens, logger)
         self.client = anthropic.AsyncAnthropic()
         self.batcher = ContextVar('batcher', default=None)
