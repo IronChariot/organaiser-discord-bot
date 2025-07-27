@@ -54,13 +54,13 @@ class Reminder:
             interval = 'month'
             count *= 120
 
-        if interval == 'day':
+        if interval in ('day', 'daily'):
             time = self.time
             while time <= after:
                 time += timedelta(days=count)
             return time
 
-        assert interval == 'month'
+        assert interval == 'month', f'invalid interval {interval}'
         time = self.time
         while time <= after:
             carry, new_month = divmod((time.month - 1) + count, 12)
