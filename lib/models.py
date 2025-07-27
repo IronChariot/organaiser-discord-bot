@@ -15,6 +15,7 @@ import asyncio
 from contextvars import ContextVar
 
 from .msgtypes import Role, Message, AssistantMessage, Attachment
+from .util import translate_cites
 
 # Time in seconds between checking whether a batch is done.
 BATCH_CHECK_DELAY = 60.0
@@ -45,55 +46,60 @@ class Model(ABC):
                 self.logger.info(f"Querying model (Attempt {attempt + 1}, Temperature: {temperature})")
             self.logger.info(f"User message: {messages[-1].content}")
 
-            message = await self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt, return_type)
-            self.logger.info(f"Model response: {message}")
+            response_messages = await self.chat_completion(messages, self.model_name, temperature, self.max_tokens, system_prompt, return_type)
+            self.logger.info(f"Model response: {response_messages}")
+            valid_messages = []
 
-            if message and not message.timestamp:
-                message.timestamp = datetime.now(tz=timezone.utc)
+            for message in response_messages:
+                if message and not message.timestamp:
+                    message.timestamp = datetime.now(tz=timezone.utc)
 
-            valid = True
-            if return_type is not str:
-                # Some models will output text other than the JSON response
-                # Best way to find the JSON alone would be to specifically get everything from the { to the }
-                if return_type is list and "[" in message.content:
-                    begin = message.content.find("[")
-                    end = message.content.rfind("]")
-                    if begin < 0 or end < begin:
-                        valid = False
-                    else:
-                        message.content = message.content[begin:end + 1]
-
-                elif return_type is dict and "{" in message.content:
-                    begin = message.content.find("{")
-                    end = message.content.rfind("}")
-                    if begin < 0 or end < begin:
-                        valid = False
-                    else:
-                        message.content = message.content[begin:end + 1]
-
-                if not message.content:
-                    response = None
-                else:
-                    try:
-                        response = json.loads(message.content, strict=False)
-                    except json.JSONDecodeError:
-                        # Remove comments
-                        if '//' in message.content or '#' in message.content:
-                            message.content = re.sub(r'([\[\]\{\},"])\s*(//|#).*$', '\\1', message.content, flags=re.MULTILINE)
-                            try:
-                                response = json.loads(message.content, strict=False)
-                            except json.JSONDecodeError:
-                                valid = False
-                        else:
+                valid = True
+                if return_type is not str:
+                    # Some models will output text other than the JSON response
+                    # Best way to find the JSON alone would be to specifically get everything from the { to the }
+                    if return_type is list and "[" in message.content:
+                        begin = message.content.find("[")
+                        end = message.content.rfind("]")
+                        if begin < 0 or end < begin:
                             valid = False
-            else:
-                response = message.content
+                        else:
+                            message.content = message.content[begin:end + 1]
 
-            if valid and validate_func is not None and not validate_func(response):
-                valid = False
+                    elif return_type is dict and "{" in message.content:
+                        begin = message.content.find("{")
+                        end = message.content.rfind("}")
+                        if begin < 0 or end < begin:
+                            valid = False
+                        else:
+                            message.content = message.content[begin:end + 1]
 
-            if valid:
-                messages.append(message)
+                    if not message.content:
+                        response = None
+                    else:
+                        try:
+                            response = json.loads(message.content, strict=False)
+                        except json.JSONDecodeError:
+                            # Remove comments
+                            if '//' in message.content or '#' in message.content:
+                                message.content = re.sub(r'([\[\]\{\},"])\s*(//|#).*$', '\\1', message.content, flags=re.MULTILINE)
+                                try:
+                                    response = json.loads(message.content, strict=False)
+                                except json.JSONDecodeError:
+                                    valid = False
+                            else:
+                                valid = False
+                else:
+                    response = message.content
+
+                if valid and validate_func is not None and not validate_func(response):
+                    valid = False
+
+                if valid:
+                    valid_messages.append(message)
+
+            if valid_messages:
+                messages += valid_messages
                 return response
 
             temperature = min(temperature + 0.1, 1.0)
@@ -209,21 +215,53 @@ class AnthropicModel(Model):
         if prefill:
             clean_messages.append({"role": "assistant", "content": prefill})
 
+        tools = []
+        if model.startswith('claude-sonnet-') or model.startswith('claude-opus-'):
+            tools.append({
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 5
+            })
+
         try:
             chat_completion = await self._do_request(
                 system=system_prompt,
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
-                messages=clean_messages
+                messages=clean_messages,
+                tools=tools
             )
 
-            text_response = prefill + chat_completion.content[0].text
-            return AssistantMessage(text_response)
+            messages = []
+            searches = []
+            for content in chat_completion.content:
+                if content.text:
+                    if prefill:
+                        text_response = prefill + content.text
+                        prefill = None
+                    else:
+                        text_response = content.text
+
+                    message = AssistantMessage(text_response)
+                    if searches:
+                        message.searches += searches
+                        searches.clear()
+                    messages.append(message)
+
+                if content.type == 'server_tool_use' and content.name == 'web_search':
+                    results = []
+                    for result in chat_completion.content:
+                        if result.type == 'web_search_tool_result' and result.tool_use_id == content.id:
+                            for result_content in result.content:
+                                results.append(result_content['url'])
+                    searches.append((content.input['query'], results))
+
+            return messages
 
         except Exception as e:
             print("Error: " + str(e))
-            return AssistantMessage("Error querying the LLM: " + str(e))
+            return [AssistantMessage("Error querying the LLM: " + str(e))]
 
     def _do_request(self, **kwargs):
         batcher = self.batcher.get()
@@ -339,11 +377,11 @@ class OpenAIModel(Model):
             )
 
             text_response = chat_completion.choices[0].message.content
-            return AssistantMessage(text_response)
+            return [AssistantMessage(text_response)]
 
         except Exception as e:
             print("Error: " + str(e))
-            return AssistantMessage("Error querying the LLM: " + str(e))
+            return [AssistantMessage("Error querying the LLM: " + str(e))]
 
 
 class OpenRouterModel(Model):
@@ -377,11 +415,11 @@ class OpenRouterModel(Model):
                 max_tokens=max_tokens
             )
             text_response = chat_completion.choices[0].message.content
-            return AssistantMessage(text_response)
+            return [AssistantMessage(text_response)]
 
         except Exception as e:
             print("Error: " + str(e))
-            return AssistantMessage("Error querying the LLM: " + str(e))
+            return [AssistantMessage("Error querying the LLM: " + str(e))]
 
 
 class GeminiModel(Model):
@@ -446,7 +484,7 @@ class GeminiModel(Model):
             response = await chat_session.send_message_async(await self.encode_parts(messages[-1]))
 
             if len(response.parts) <= 1:
-                return AssistantMessage(response.text)
+                return [AssistantMessage(response.text)]
 
             if return_type is dict or return_type is list:
                 # Identify which part is JSON, the rest must be thought
@@ -463,18 +501,18 @@ class GeminiModel(Model):
                     return "No JSON found in LLM response."
 
                 thought = '\n'.join(thoughts).strip()
-                return AssistantMessage(content, thought=thought)
+                return [AssistantMessage(content, thought=thought)]
 
             if len(response.parts) > 1:
                 # Assume the first part is thoughts, the rest content
                 content = ''.join(part.text for part in response.parts[1:] if "text" in part)
-                return AssistantMessage(content, thought=response.parts[0].text)
+                return [AssistantMessage(content, thought=response.parts[0].text)]
             else:
-                return AssistantMessage(response.parts[0].text)
+                return [AssistantMessage(response.parts[0].text)]
 
         except Exception as e:
             print("Error: " + str(e))
-            return AssistantMessage("Error querying the LLM: " + str(e))
+            return [AssistantMessage("Error querying the LLM: " + str(e))]
 
 
 class DeepSeekModel(Model):
@@ -512,11 +550,11 @@ class DeepSeekModel(Model):
             )
 
             text_response = chat_completion.choices[0].message.content
-            return AssistantMessage(text_response)
+            return [AssistantMessage(text_response)]
 
         except Exception as e:
             print("Error: " + str(e))
-            return AssistantMessage("Error querying the LLM: " + str(e))
+            return [AssistantMessage("Error querying the LLM: " + str(e))]
 
 
 def create(model_name):

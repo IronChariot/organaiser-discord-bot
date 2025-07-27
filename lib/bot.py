@@ -10,7 +10,7 @@ import traceback
 from collections import defaultdict
 from functools import wraps
 
-from .util import split_message, format_json_md
+from .util import split_message, format_json_md, translate_cites
 from .msgtypes import UserMessage, Attachment, Channel, Role
 from . import views
 
@@ -222,7 +222,7 @@ class Bot(discord.Client):
 
         while True:
             try:
-                response = await self.session.query_assistant_response()
+                responses = await self.session.query_assistant_response()
                 break
             except ValueError as ex:
                 channel = self.chat_channel or self.log_channel
@@ -238,9 +238,10 @@ class Bot(discord.Client):
                 if not view.retry:
                     return
 
-        if not response:
-            return
+        for response in responses:
+            await self._process_response(response)
 
+    async def _process_response(self, response):
         # Find the corresponding user messages.
         messages = []
         for user_message in response.user_messages:
@@ -296,6 +297,8 @@ class Bot(discord.Client):
             # If there's no chat message and there's no user message to react to
             # then the react becomes the chat message
             chat = response.chat
+            if chat:
+                chat = translate_cites(chat)
             if not chat and response.reactions and not last_message:
                 chat = ''.join(response.reactions)
 

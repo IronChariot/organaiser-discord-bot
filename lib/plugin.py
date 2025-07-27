@@ -201,4 +201,4 @@ class PinnedMessage:
         if self._discord_message:
             content = await self._func()
             content = self.header + '\n\n' + content
-            await self._discord_message.edit(content=content, view=self._discord_view)
+            await self._discord_message.edit(content=content[:2000], view=self._discord_view)

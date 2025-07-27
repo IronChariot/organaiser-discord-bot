@@ -1,5 +1,6 @@
 import json
 import asyncio
+import re
 
 EMOJI_MODIFIERS = '\ufe0f\ufe0e\U0001f3fb\U0001f3fc\U0001f3fd\U0001f3fe\U0001f3ff' \
                 +  ''.join(chr(i) for i in range(0xe0020, 0xe0080))
@@ -106,3 +107,12 @@ class Condition:
 
     def __await__(self):
         return self.wait().__await__()
+
+
+def translate_cites(text):
+    def replacer(match):
+        idx = match.group(1).split('-', 1)[0]
+        content = match.group(2)
+        return f"{content}[{idx}]"
+
+    return re.sub(r'<cite index="([^"]+)">(.*?)</cite>', replacer, text)

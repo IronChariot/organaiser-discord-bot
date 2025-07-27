@@ -51,7 +51,7 @@ class Attachment:
 
 
 class Message:
-    __slots__ = 'content', 'id', 'attachments', 'timestamp', 'thought'
+    __slots__ = 'content', 'id', 'attachments', 'timestamp', 'thought', 'searches'
 
     def __init__(self, content: str, id=None, timestamp=None, thought=None):
         assert hasattr(self, 'role')
@@ -60,6 +60,7 @@ class Message:
         self.attachments = []
         self.timestamp = timestamp
         self.thought = thought
+        self.searches = []
 
     def attach(self, url, content_type):
         self.attachments.append(Attachment(url, content_type))

@@ -198,7 +198,7 @@ class Session:
             file.flush()
 
     async def chat(self, message: UserMessage, full_context: bool = False) -> AssistantResponse:
-        """User or system sends a message.  Returns assistant response."""
+        """User or system sends a message.  Returns assistant responses."""
 
         self.last_activity = datetime.now()
 
@@ -219,6 +219,7 @@ class Session:
             for prompt in plugin._dynamic_system_prompts:
                 system_prompt += '\n\n' + prompt(self)
 
+        responses = []
         async with self.context_lock:
             if self.message_history[-1].role != Role.USER:
                 return
@@ -240,15 +241,25 @@ class Session:
                 messages = [message.reduce() for message in self.message_history[:-5]] + self.message_history[-5:]
 
             data = await self.assistant.model.query(messages, system_prompt=system_prompt, return_type=dict)
-            thought = None
             assert messages[-1].role == Role.ASSISTANT
-            thought = messages[-1].thought
 
-            self.message_history.append(messages[-1])
-            self.message_history[-1].dump(self.messages_file)
+            new_messages = []
+            while messages[-1].role == Role.ASSISTANT:
+                new_messages.insert(0, messages.pop())
+
+            for message in new_messages:
+                self.message_history.append(message)
+                message.dump(self.messages_file)
+                data = message.parse_json()
+                response = AssistantResponse(self, data, user_messages, thought=message.thought)
+                for query, results in message.searches:
+                    results_formatted = ', '.join(f'[{n+1}]({url})' for n, url in enumerate(results))
+                    response.actions_taken.append(f'Ran search for "{query}" with results {results_formatted}')
+
+                responses.append(response)
             self.messages_file.flush()
 
-        return AssistantResponse(self, data, user_messages, thought=thought)
+        return responses
 
     async def isolated_query(self, query, attachments=[], *, format_prompt=None,
                              return_type=str, model=None, full_context=True):
