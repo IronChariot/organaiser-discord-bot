@@ -100,9 +100,9 @@ class AssistantResponse:
         async def read_attachment(attachment):
             return (attachment, await attachment.read())
 
-        pending = []
+        pending = set()
         async for attachment in self.get_attachments():
-            pending.append(asyncio.create_task(read_attachment(attachment)))
+            pending.add(asyncio.create_task(read_attachment(attachment)))
 
             done, pending = await asyncio.wait(pending, timeout=0)
             for task in done:
