@@ -151,14 +151,16 @@ class OllamaModel(Model):
         else:
             text_response = f"Error: {response.status_code}"
 
-        return AssistantMessage(text_response)
+        return [AssistantMessage(text_response)]
 
 
 class AnthropicModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
         if model_name == "claude-opus":
             model_name = "claude-3-opus-20240229" # $15/$75
-        elif model_name == "claude-sonnet" or model_name == "claude-3-7-sonnet":
+        elif model_name == "claude-sonnet" or model_name == "claude-sonnet-4":
+            model_name = "claude-sonnet-4-20250514"
+        elif model_name == "claude-3-7-sonnet":
             model_name = "claude-3-7-sonnet-20250219" # $3/$15
         elif model_name == "claude-3-5-sonnet":
             model_name = "claude-3-5-sonnet-20241022" # $3/$15
