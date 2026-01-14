@@ -162,15 +162,21 @@ class OllamaModel(Model):
 
 class AnthropicModel(Model):
     def __init__(self, model_name: str, system_prompt: str = "", temperature: float = 0.0, max_tokens: int = 4000, logger=None):
-        if model_name == "claude-opus":
+        if model_name == "claude-opus" or model_name == "claude-opus-4-5":
+            model_name = "claude-opus-4-5-20251101" # $5/$25
+        elif model_name == "claude-3-opus":
             model_name = "claude-3-opus-20240229" # $15/$75
-        elif model_name == "claude-sonnet" or model_name == "claude-sonnet-4":
+        elif model_name == "claude-sonnet" or model_name == "claude-sonnet-4-5":
+            model_name = "claude-sonnet-4-5-20250929"
+        elif model_name == "claude-sonnet-4":
             model_name = "claude-sonnet-4-20250514"
         elif model_name == "claude-3-7-sonnet":
             model_name = "claude-3-7-sonnet-20250219" # $3/$15
         elif model_name == "claude-3-5-sonnet":
             model_name = "claude-3-5-sonnet-20241022" # $3/$15
         elif model_name == "claude-haiku":
+            model_name = "claude-haiku-4-5-20251001" # $1/$5
+        elif model_name == "claude-3-5-haiku":
             model_name = "claude-3-5-haiku-20241022" # $1/$5
         elif model_name == "claude-3-sonnet":
             model_name = "claude-3-sonnet-20240229"
