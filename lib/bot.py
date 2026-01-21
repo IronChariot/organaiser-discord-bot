@@ -117,8 +117,10 @@ class Bot(discord.Client):
             if isinstance(response, dict) and isinstance(response.get('prompt_after'), (float, int)):
                 prompt_after = int(response['prompt_after'])
                 deadline = message.timestamp + timedelta(minutes=prompt_after)
-            else:
+            elif prompt_after is not None:
                 deadline = datetime.now(tz=timezone.utc) + timedelta(minutes=prompt_after)
+            else:
+                deadline = None
         else:
             deadline = None
 
@@ -209,7 +211,10 @@ class Bot(discord.Client):
                 else:
                     prompt_after = self.assistant.default_prompt_after
 
-                deadline = self.session.last_message.timestamp + timedelta(minutes=prompt_after)
+                if prompt_after is not None:
+                    deadline = self.session.last_message.timestamp + timedelta(minutes=prompt_after)
+                else:
+                    deadline = None
             except Exception as ex:
                 await self.write_bug_report(ex)
                 await asyncio.sleep(10)

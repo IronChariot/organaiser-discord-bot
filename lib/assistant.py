@@ -81,6 +81,8 @@ class Assistant:
         ass.unsummarised_messages = data.get('unsummarised_messages', 1000)
         ass.response_delay = data.get('response_delay', 1)
         ass.default_prompt_after = data.get('default_prompt_after', 30)
+        if ass.default_prompt_after <= 0:
+            ass.default_prompt_after = None
         ass.plugin_config = data.get('plugins', {})
         return ass
 
